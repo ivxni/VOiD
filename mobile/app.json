@@ -1,0 +1,70 @@
+{
+  "expo": {
+    "name": "VOiD",
+    "slug": "void-app",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "scheme": "void",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.void.app",
+      "usesAppleSignIn": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "VOiD needs camera access to capture photos and apply adversarial cloaking to protect your identity.",
+        "NSPhotoLibraryUsageDescription": "VOiD needs photo library access to import photos for cloaking.",
+        "NSPhotoLibraryAddUsageDescription": "VOiD needs permission to save cloaked photos to your gallery.",
+        "NSMicrophoneUsageDescription": "VOiD needs microphone access to record audio with video cloaking."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#000000"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "com.void.app",
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "READ_MEDIA_VIDEO",
+        "WRITE_EXTERNAL_STORAGE",
+        "RECORD_AUDIO"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "VOiD needs camera access to capture photos and apply adversarial cloaking.",
+          "microphonePermission": "VOiD needs microphone access for video cloaking.",
+          "recordAudioAndroid": true
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "VOiD needs photo library access to import and save cloaked photos.",
+          "savePhotosPermission": "VOiD needs permission to save cloaked photos to your gallery.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "VOiD needs access to your photos to import them for cloaking.",
+          "cameraPermission": false
+        }
+      ]
+    ]
+  }
+}
