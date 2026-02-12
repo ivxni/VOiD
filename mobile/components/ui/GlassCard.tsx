@@ -1,28 +1,32 @@
 import React from 'react';
 import { View, StyleSheet, ViewStyle } from 'react-native';
-import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import { colors, borderRadius, spacing } from '../../lib/constants/theme';
 
 interface GlassCardProps {
   children: React.ReactNode;
   style?: ViewStyle;
-  intensity?: number;
   noPadding?: boolean;
 }
 
 export function GlassCard({
   children,
   style,
-  intensity = 40,
   noPadding = false,
 }: GlassCardProps) {
   return (
     <View style={[styles.container, style]}>
-      <BlurView intensity={intensity} tint="dark" style={styles.blur}>
+      <LinearGradient
+        colors={['rgba(255,255,255,0.07)', 'rgba(255,255,255,0.02)', 'rgba(0,0,0,0)']}
+        locations={[0, 0.5, 1]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0.3, y: 1 }}
+        style={styles.gradient}
+      >
         <View style={[styles.content, noPadding && styles.noPadding]}>
           {children}
         </View>
-      </BlurView>
+      </LinearGradient>
     </View>
   );
 }
@@ -34,12 +38,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  blur: {
+  gradient: {
     width: '100%',
   },
   content: {
     padding: spacing.lg,
-    backgroundColor: colors.glassBg,
+    backgroundColor: 'rgba(14,14,14,0.85)',
   },
   noPadding: {
     padding: 0,

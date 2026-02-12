@@ -10,6 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -145,56 +146,52 @@ export default function HomeScreen() {
         </View>
 
         {/* Stats Panel */}
-        <View style={styles.statsPanel}>
-          {/* Cloaked */}
-          <View style={styles.statCell}>
-            <View style={styles.statTopRow}>
-              <View style={[styles.statDot, { backgroundColor: colors.success }]} />
-              <Text style={styles.statLabel}>CLOAKED</Text>
-            </View>
-            <Text style={styles.statValue}>0</Text>
-            <View style={styles.statMiniBar}>
-              <View style={[styles.statMiniFill, { width: '0%', backgroundColor: colors.success }]} />
-            </View>
-          </View>
-
-          {/* Divider */}
-          <View style={styles.statDivider} />
-
-          {/* Remaining */}
-          <View style={styles.statCell}>
-            <View style={styles.statTopRow}>
-              <View style={[styles.statDot, { backgroundColor: tier.limits.monthlyCloak === -1 ? colors.success : colors.warning }]} />
-              <Text style={styles.statLabel}>REMAINING</Text>
-            </View>
-            <Text style={[
-              styles.statValue,
-              tier.limits.monthlyCloak === -1 && styles.statValueUnlimited,
-            ]}>
-              {cloaksRemaining === 'Unlimited' ? '\u221E' : cloaksRemaining}
-            </Text>
-            {tier.limits.monthlyCloak !== -1 && (
-              <View style={styles.statMiniBar}>
-                <View style={[styles.statMiniFill, { width: '100%', backgroundColor: colors.warning }]} />
+        <View style={styles.statsPanelOuter}>
+          <LinearGradient
+            colors={['rgba(255,255,255,0.07)', 'rgba(255,255,255,0.02)', 'rgba(0,0,0,0)']}
+            locations={[0, 0.5, 1]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0.3, y: 1 }}
+            style={styles.statsPanelGradient}
+          >
+            <View style={styles.statsPanel}>
+              {/* Cloaked */}
+              <View style={styles.statCell}>
+                <Text style={styles.statLabel}>CLOAKED</Text>
+                <View style={styles.statValueRow}>
+                  <View style={[styles.statDot, { backgroundColor: colors.success }]} />
+                  <Text style={styles.statValue}>0</Text>
+                </View>
               </View>
-            )}
-            {tier.limits.monthlyCloak === -1 && (
-              <Text style={styles.statInfiniteLabel}>UNLIMITED</Text>
-            )}
-          </View>
 
-          {/* Divider */}
-          <View style={styles.statDivider} />
+              <View style={styles.statDivider} />
 
-          {/* Avg Time */}
-          <View style={styles.statCell}>
-            <View style={styles.statTopRow}>
-              <View style={[styles.statDot, { backgroundColor: colors.silver }]} />
-              <Text style={styles.statLabel}>AVG TIME</Text>
+              {/* Remaining */}
+              <View style={styles.statCell}>
+                <Text style={styles.statLabel}>REMAINING</Text>
+                <View style={styles.statValueRow}>
+                  <View style={[styles.statDot, { backgroundColor: tier.limits.monthlyCloak === -1 ? colors.success : colors.warning }]} />
+                  <Text style={[
+                    styles.statValue,
+                    tier.limits.monthlyCloak === -1 && styles.statValueAccent,
+                  ]}>
+                    {cloaksRemaining === 'Unlimited' ? '\u221E' : cloaksRemaining}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.statDivider} />
+
+              {/* Avg Time */}
+              <View style={styles.statCell}>
+                <Text style={styles.statLabel}>AVG TIME</Text>
+                <View style={styles.statValueRow}>
+                  <View style={[styles.statDot, { backgroundColor: colors.silver }]} />
+                  <Text style={styles.statValue}>{'\u2014'}</Text>
+                </View>
+              </View>
             </View>
-            <Text style={styles.statValue}>{'\u2014'}</Text>
-            <Text style={styles.statUnit}>ms</Text>
-          </View>
+          </LinearGradient>
         </View>
 
         {/* Import Preview / Processing Inline */}
@@ -534,80 +531,55 @@ const styles = StyleSheet.create({
   },
 
   // Stats Panel
-  statsPanel: {
-    flexDirection: 'row',
+  statsPanelOuter: {
     marginHorizontal: spacing.lg,
     marginBottom: spacing.md,
-    backgroundColor: colors.glassBg,
-    borderRadius: borderRadius.lg,
+    borderRadius: borderRadius.md,
+    overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.border,
-    paddingVertical: spacing.lg,
-    overflow: 'hidden',
+  },
+  statsPanelGradient: {
+    width: '100%',
+  },
+  statsPanel: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(14,14,14,0.85)',
+    paddingVertical: spacing.md,
   },
   statCell: {
     flex: 1,
     alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.sm,
+    gap: 4,
   },
-  statTopRow: {
+  statValueRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: 2,
+    gap: 5,
   },
   statDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
   },
   statLabel: {
     fontFamily: fonts.mono,
-    fontSize: 9,
+    fontSize: 8,
     color: colors.muted,
     letterSpacing: 1.5,
   },
   statValue: {
     fontFamily: fonts.monoBold,
-    fontSize: fontSize.xxl,
+    fontSize: fontSize.lg,
     color: colors.white,
-    lineHeight: fontSize.xxl + 4,
   },
-  statValueUnlimited: {
-    fontSize: fontSize.xxxl,
+  statValueAccent: {
     color: colors.success,
-    lineHeight: fontSize.xxxl + 4,
-  },
-  statInfiniteLabel: {
-    fontFamily: fonts.mono,
-    fontSize: 8,
-    color: colors.success,
-    letterSpacing: 2,
-    opacity: 0.7,
-  },
-  statUnit: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    color: colors.subtle,
-    letterSpacing: 1,
-  },
-  statMiniBar: {
-    width: '70%',
-    height: 2,
-    backgroundColor: colors.subtle,
-    borderRadius: 1,
-    overflow: 'hidden',
-    marginTop: 2,
-  },
-  statMiniFill: {
-    height: '100%',
-    borderRadius: 1,
   },
   statDivider: {
     width: 1,
     backgroundColor: colors.border,
-    marginVertical: -spacing.lg,
+    marginVertical: -spacing.md,
   },
 
   // Section Headers

@@ -8,6 +8,7 @@ import {
   Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import { GlassCard } from '../../components/ui/GlassCard';
@@ -79,39 +80,59 @@ export default function SettingsScreen() {
           {/* Upgrade Banner */}
           {currentTier.id === 'free' && (
             <TouchableOpacity
-              style={styles.upgradeBanner}
+              style={styles.upgradeBannerOuter}
               onPress={() => router.push('/upgrade')}
               activeOpacity={0.7}
             >
-              <View style={styles.upgradeBannerLeft}>
-                <View style={styles.upgradeBannerIcon}>
-                  <FontAwesome5 name="shield-alt" size={16} color={colors.white} />
+              <LinearGradient
+                colors={['rgba(255,255,255,0.1)', 'rgba(255,255,255,0.03)', 'rgba(0,0,0,0)']}
+                locations={[0, 0.5, 1]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.upgradeBannerGradient}
+              >
+                <View style={styles.upgradeBannerContent}>
+                  <View style={styles.upgradeBannerLeft}>
+                    <View style={styles.upgradeBannerIcon}>
+                      <FontAwesome5 name="shield-alt" size={16} color={colors.white} />
+                    </View>
+                    <View>
+                      <Text style={styles.upgradeBannerTitle}>Upgrade to Pro</Text>
+                      <Text style={styles.upgradeBannerDesc}>Unlimited cloaks & more</Text>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.muted} />
                 </View>
-                <View>
-                  <Text style={styles.upgradeBannerTitle}>Upgrade to Pro</Text>
-                  <Text style={styles.upgradeBannerDesc}>Unlimited cloaks & more</Text>
-                </View>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+              </LinearGradient>
             </TouchableOpacity>
           )}
 
           {currentTier.id === 'pro' && (
             <TouchableOpacity
-              style={styles.upgradeBanner}
+              style={styles.upgradeBannerOuter}
               onPress={() => router.push('/upgrade')}
               activeOpacity={0.7}
             >
-              <View style={styles.upgradeBannerLeft}>
-                <View style={styles.upgradeBannerIcon}>
-                  <FontAwesome5 name="crown" size={14} color={colors.white} />
+              <LinearGradient
+                colors={['rgba(255,255,255,0.1)', 'rgba(255,255,255,0.03)', 'rgba(0,0,0,0)']}
+                locations={[0, 0.5, 1]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.upgradeBannerGradient}
+              >
+                <View style={styles.upgradeBannerContent}>
+                  <View style={styles.upgradeBannerLeft}>
+                    <View style={styles.upgradeBannerIcon}>
+                      <FontAwesome5 name="crown" size={14} color={colors.white} />
+                    </View>
+                    <View>
+                      <Text style={styles.upgradeBannerTitle}>Upgrade to Pro+</Text>
+                      <Text style={styles.upgradeBannerDesc}>Batch processing & RAW export</Text>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.muted} />
                 </View>
-                <View>
-                  <Text style={styles.upgradeBannerTitle}>Upgrade to Pro+</Text>
-                  <Text style={styles.upgradeBannerDesc}>Batch processing & RAW export</Text>
-                </View>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+              </LinearGradient>
             </TouchableOpacity>
           )}
         </GlassCard>
@@ -223,12 +244,22 @@ export default function SettingsScreen() {
 
         {/* Sign Out */}
         <TouchableOpacity
-          style={styles.signOutButton}
+          style={styles.signOutOuter}
           onPress={logout}
           activeOpacity={0.7}
         >
-          <Ionicons name="log-out-outline" size={18} color={colors.error} />
-          <Text style={styles.signOutText}>Sign Out</Text>
+          <LinearGradient
+            colors={['rgba(255,42,42,0.08)', 'rgba(255,42,42,0.02)', 'rgba(0,0,0,0)']}
+            locations={[0, 0.5, 1]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0.3, y: 1 }}
+            style={styles.signOutGradient}
+          >
+            <View style={styles.signOutContent}>
+              <Ionicons name="log-out-outline" size={18} color={colors.error} />
+              <Text style={styles.signOutText}>Sign Out</Text>
+            </View>
+          </LinearGradient>
         </TouchableOpacity>
 
         <Text style={styles.footer}>
@@ -324,17 +355,23 @@ const styles = StyleSheet.create({
   },
 
   // Upgrade Banner
-  upgradeBanner: {
+  upgradeBannerOuter: {
+    marginTop: spacing.md,
+    borderRadius: borderRadius.md,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  upgradeBannerGradient: {
+    width: '100%',
+  },
+  upgradeBannerContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: spacing.md,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.accentGlow,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    backgroundColor: 'rgba(14,14,14,0.8)',
   },
   upgradeBannerLeft: {
     flexDirection: 'row',
@@ -345,7 +382,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -447,17 +484,24 @@ const styles = StyleSheet.create({
   },
 
   // Sign Out
-  signOutButton: {
+  signOutOuter: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.xl,
+    borderRadius: borderRadius.md,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  signOutGradient: {
+    width: '100%',
+  },
+  signOutContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.xl,
     paddingVertical: spacing.md,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: 'rgba(14,14,14,0.85)',
   },
   signOutText: {
     fontFamily: fonts.sans,

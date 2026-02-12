@@ -5,6 +5,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import { GlassCard } from '../../components/ui/GlassCard';
 import {
@@ -12,6 +13,7 @@ import {
   fonts,
   fontSize,
   spacing,
+  borderRadius,
 } from '../../lib/constants/theme';
 
 export default function GalleryScreen() {
@@ -23,29 +25,61 @@ export default function GalleryScreen() {
         <Text style={styles.headerSubtitle}>CLOAKED PHOTOS</Text>
       </View>
 
-      {/* Stats */}
-      <View style={styles.statsRow}>
-        <StatCard
-          value="0"
-          label="Cloaked"
-          icon={<FontAwesome5 name="shield-alt" size={14} color={colors.accent} />}
-        />
-        <StatCard
-          value="0"
-          label="Saved"
-          icon={<Ionicons name="download-outline" size={16} color={colors.accent} />}
-        />
-        <StatCard
-          value="—"
-          label="Avg. Time"
-          icon={<Ionicons name="timer-outline" size={16} color={colors.accent} />}
-        />
+      {/* Stats Panel */}
+      <View style={styles.statsPanelOuter}>
+        <LinearGradient
+          colors={['rgba(255,255,255,0.07)', 'rgba(255,255,255,0.02)', 'rgba(0,0,0,0)']}
+          locations={[0, 0.5, 1]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0.3, y: 1 }}
+          style={styles.statsPanelGradient}
+        >
+          <View style={styles.statsPanel}>
+            <View style={styles.statCell}>
+              <Text style={styles.statLabel}>CLOAKED</Text>
+              <View style={styles.statValueRow}>
+                <View style={[styles.statDot, { backgroundColor: colors.success }]} />
+                <Text style={styles.statValue}>0</Text>
+              </View>
+            </View>
+
+            <View style={styles.statDivider} />
+
+            <View style={styles.statCell}>
+              <Text style={styles.statLabel}>SAVED</Text>
+              <View style={styles.statValueRow}>
+                <View style={[styles.statDot, { backgroundColor: colors.accent }]} />
+                <Text style={styles.statValue}>0</Text>
+              </View>
+            </View>
+
+            <View style={styles.statDivider} />
+
+            <View style={styles.statCell}>
+              <Text style={styles.statLabel}>AVG TIME</Text>
+              <View style={styles.statValueRow}>
+                <View style={[styles.statDot, { backgroundColor: colors.silver }]} />
+                <Text style={styles.statValue}>{'\u2014'}</Text>
+              </View>
+            </View>
+          </View>
+        </LinearGradient>
       </View>
 
       {/* Empty State */}
       <View style={styles.emptyState}>
-        <View style={styles.emptyIconContainer}>
-          <Ionicons name="images-outline" size={48} color={colors.subtle} />
+        <View style={styles.emptyIconOuter}>
+          <LinearGradient
+            colors={['rgba(255,255,255,0.08)', 'rgba(255,255,255,0.02)', 'rgba(0,0,0,0)']}
+            locations={[0, 0.5, 1]}
+            start={{ x: 0.3, y: 0 }}
+            end={{ x: 0.7, y: 1 }}
+            style={styles.emptyIconGradient}
+          >
+            <View style={styles.emptyIconInner}>
+              <Ionicons name="images-outline" size={40} color={colors.subtle} />
+            </View>
+          </LinearGradient>
         </View>
         <Text style={styles.emptyTitle}>No cloaked photos yet</Text>
         <Text style={styles.emptySubtitle}>
@@ -54,26 +88,6 @@ export default function GalleryScreen() {
         </Text>
       </View>
     </SafeAreaView>
-  );
-}
-
-function StatCard({
-  value,
-  label,
-  icon,
-}: {
-  value: string;
-  label: string;
-  icon: React.ReactNode;
-}) {
-  return (
-    <GlassCard style={styles.statCard}>
-      <View style={styles.statIconRow}>
-        {icon}
-      </View>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </GlassCard>
   );
 }
 
@@ -100,48 +114,81 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     marginTop: 4,
   },
-  statsRow: {
-    flexDirection: 'row',
-    paddingHorizontal: spacing.lg,
-    gap: spacing.sm,
+
+  // Stats Panel (matches home page)
+  statsPanelOuter: {
+    marginHorizontal: spacing.lg,
     marginBottom: spacing.lg,
+    borderRadius: borderRadius.md,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  statCard: {
+  statsPanelGradient: {
+    width: '100%',
+  },
+  statsPanel: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(14,14,14,0.85)',
+    paddingVertical: spacing.md,
+  },
+  statCell: {
     flex: 1,
     alignItems: 'center',
+    gap: 4,
   },
-  statIconRow: {
-    marginBottom: spacing.xs,
+  statValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
   },
-  statValue: {
-    fontFamily: fonts.monoBold,
-    fontSize: fontSize.xxl,
-    color: colors.white,
-    marginBottom: 4,
+  statDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
   },
   statLabel: {
     fontFamily: fonts.mono,
-    fontSize: fontSize.xs,
+    fontSize: 8,
     color: colors.muted,
-    letterSpacing: 1,
-    textTransform: 'uppercase',
+    letterSpacing: 1.5,
   },
+  statValue: {
+    fontFamily: fonts.monoBold,
+    fontSize: fontSize.lg,
+    color: colors.white,
+  },
+  statDivider: {
+    width: 1,
+    backgroundColor: colors.border,
+    marginVertical: -spacing.md,
+  },
+
+  // Empty State
   emptyState: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: spacing.xl,
   },
-  emptyIconContainer: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: colors.darkGray,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.lg,
+  emptyIconOuter: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.border,
+    marginBottom: spacing.lg,
+  },
+  emptyIconGradient: {
+    width: '100%',
+    height: '100%',
+  },
+  emptyIconInner: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(14,14,14,0.85)',
   },
   emptyTitle: {
     fontFamily: fonts.sansSemiBold,
