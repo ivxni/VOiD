@@ -127,7 +127,7 @@ export default function HomeScreen() {
       : `${tier.limits.monthlyCloak}`;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}

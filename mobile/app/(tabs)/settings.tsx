@@ -48,7 +48,7 @@ export default function SettingsScreen() {
   const currentTier = getTierForStatus(user?.subscriptionStatus ?? 'none');
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
