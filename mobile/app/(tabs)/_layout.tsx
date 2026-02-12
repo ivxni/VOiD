@@ -17,12 +17,12 @@ export default function TabsLayout() {
       }}
     >
       <Tabs.Screen
-        name="camera"
+        name="home"
         options={{
-          title: 'Cloak',
+          title: 'Home',
           tabBarIcon: ({ focused }) => (
             <FontAwesome5
-              name="shield-alt"
+              name="home"
               size={20}
               color={focused ? colors.white : colors.muted}
             />

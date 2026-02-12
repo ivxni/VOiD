@@ -50,7 +50,7 @@ export default function GalleryScreen() {
         <Text style={styles.emptyTitle}>No cloaked photos yet</Text>
         <Text style={styles.emptySubtitle}>
           Photos you cloak will appear here.{'\n'}
-          Head to the Cloak tab to get started.
+          Head to the Home tab to get started.
         </Text>
       </View>
     </SafeAreaView>

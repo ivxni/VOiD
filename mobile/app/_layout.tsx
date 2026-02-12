@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { View, StyleSheet } from 'react-native';
-import { Slot, useRouter, useSegments } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import {
   useFonts,
@@ -48,7 +48,7 @@ export default function RootLayout() {
     if (!isAuthenticated && !inAuthGroup) {
       router.replace('/(auth)/welcome');
     } else if (isAuthenticated && inAuthGroup) {
-      router.replace('/(tabs)/camera');
+      router.replace('/(tabs)/home');
     }
   }, [isAuthenticated, isLoading, fontsLoaded, segments]);
 
@@ -59,7 +59,29 @@ export default function RootLayout() {
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
-      <Slot />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.black },
+        }}
+      >
+        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen
+          name="camera-modal"
+          options={{
+            presentation: 'fullScreenModal',
+            animation: 'slide_from_bottom',
+          }}
+        />
+        <Stack.Screen
+          name="upgrade"
+          options={{
+            presentation: 'modal',
+            animation: 'slide_from_bottom',
+          }}
+        />
+      </Stack>
     </View>
   );
 }
