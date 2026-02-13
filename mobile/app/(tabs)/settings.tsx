@@ -6,11 +6,14 @@ import {
   ScrollView,
   TouchableOpacity,
   Switch,
+  Linking,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { GlassCard } from '../../components/ui/GlassCard';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { useAuthStore } from '../../lib/store/useAuthStore';
@@ -64,24 +67,34 @@ export default function SettingsScreen() {
         <SectionHeader icon="user-circle" label="ACCOUNT" />
         <GlassCard style={styles.card}>
           <View style={styles.row}>
-            <Text style={styles.rowLabel}>Plan</Text>
+            <View style={styles.rowIconLabel}>
+              <Ionicons name="mail-outline" size={15} color={colors.muted} />
+              <Text style={styles.rowLabel}>Email</Text>
+            </View>
+            <Text style={styles.rowValue} numberOfLines={1}>
+              {user?.email || 'Hidden (Apple Private Relay)'}
+            </Text>
+          </View>
+          <View style={styles.divider} />
+          <View style={styles.row}>
+            <View style={styles.rowIconLabel}>
+              <Ionicons name="shield-checkmark-outline" size={15} color={colors.muted} />
+              <Text style={styles.rowLabel}>Plan</Text>
+            </View>
             <StatusBadge
               status={currentTier.id === 'free' ? 'free' : 'cloaked'}
               label={currentTier.name.toUpperCase()}
             />
           </View>
-          {user?.email && (
-            <View style={styles.row}>
-              <Text style={styles.rowLabel}>Email</Text>
-              <Text style={styles.rowValue}>{user.email}</Text>
-            </View>
-          )}
 
           {/* Upgrade Banner */}
           {currentTier.id === 'free' && (
             <TouchableOpacity
               style={styles.upgradeBannerOuter}
-              onPress={() => router.push('/upgrade')}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.push('/upgrade');
+              }}
               activeOpacity={0.7}
             >
               <LinearGradient
@@ -94,7 +107,7 @@ export default function SettingsScreen() {
                 <View style={styles.upgradeBannerContent}>
                   <View style={styles.upgradeBannerLeft}>
                     <View style={styles.upgradeBannerIcon}>
-                      <FontAwesome5 name="shield-alt" size={16} color={colors.white} />
+                      <FontAwesome5 name="bolt" size={16} color={colors.white} />
                     </View>
                     <View>
                       <Text style={styles.upgradeBannerTitle}>Upgrade to Pro</Text>
@@ -110,7 +123,10 @@ export default function SettingsScreen() {
           {currentTier.id === 'pro' && (
             <TouchableOpacity
               style={styles.upgradeBannerOuter}
-              onPress={() => router.push('/upgrade')}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.push('/upgrade');
+              }}
               activeOpacity={0.7}
             >
               <LinearGradient
@@ -154,8 +170,10 @@ export default function SettingsScreen() {
                   ]}
                   onPress={() => {
                     if (isLocked) {
+                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
                       router.push('/upgrade');
                     } else {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                       setStrength(opt.key);
                     }
                   }}
@@ -200,7 +218,10 @@ export default function SettingsScreen() {
             </View>
             <Switch
               value={autoSave}
-              onValueChange={setAutoSave}
+              onValueChange={(val) => {
+                Haptics.selectionAsync();
+                setAutoSave(val);
+              }}
               trackColor={{ false: colors.subtle, true: colors.success }}
               thumbColor={colors.white}
             />
@@ -218,7 +239,10 @@ export default function SettingsScreen() {
             </View>
             <Switch
               value={keepOriginal}
-              onValueChange={setKeepOriginal}
+              onValueChange={(val) => {
+                Haptics.selectionAsync();
+                setKeepOriginal(val);
+              }}
               trackColor={{ false: colors.subtle, true: colors.success }}
               thumbColor={colors.white}
             />
@@ -242,10 +266,67 @@ export default function SettingsScreen() {
           </View>
         </GlassCard>
 
+        {/* Legal & Support */}
+        <SectionHeader icon="file-contract" label="LEGAL" />
+        <GlassCard style={styles.card}>
+          <LegalRow
+            icon="document-text-outline"
+            label="Terms of Service"
+            onPress={() => {
+              Haptics.selectionAsync();
+              Linking.openURL('https://getvoid.app/terms');
+            }}
+          />
+          <View style={styles.divider} />
+          <LegalRow
+            icon="lock-closed-outline"
+            label="Privacy Policy"
+            onPress={() => {
+              Haptics.selectionAsync();
+              Linking.openURL('https://getvoid.app/privacy');
+            }}
+          />
+          <View style={styles.divider} />
+          <LegalRow
+            icon="refresh-outline"
+            label="Restore Purchases"
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              Alert.alert(
+                'Restore Purchases',
+                'Looking for previous subscriptions...',
+                [{ text: 'OK' }]
+              );
+              // TODO: Implement StoreKit restore
+            }}
+          />
+          <View style={styles.divider} />
+          <LegalRow
+            icon="card-outline"
+            label="Manage Subscription"
+            onPress={() => {
+              Haptics.selectionAsync();
+              Linking.openURL('https://apps.apple.com/account/subscriptions');
+            }}
+          />
+          <View style={styles.divider} />
+          <LegalRow
+            icon="help-circle-outline"
+            label="Support & Contact"
+            onPress={() => {
+              Haptics.selectionAsync();
+              Linking.openURL('mailto:support@getvoid.app');
+            }}
+          />
+        </GlassCard>
+
         {/* Sign Out */}
         <TouchableOpacity
           style={styles.signOutOuter}
-          onPress={logout}
+          onPress={() => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            logout();
+          }}
           activeOpacity={0.7}
         >
           <LinearGradient
@@ -276,6 +357,18 @@ function SectionHeader({ icon, label }: { icon: string; label: string }) {
       <FontAwesome5 name={icon} size={10} color={colors.muted} />
       <Text style={styles.sectionTitle}>{label}</Text>
     </View>
+  );
+}
+
+function LegalRow({ icon, label, onPress }: { icon: string; label: string; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={styles.legalRow} onPress={onPress} activeOpacity={0.6}>
+      <View style={styles.rowIconLabel}>
+        <Ionicons name={icon as any} size={16} color={colors.muted} />
+        <Text style={styles.legalLabel}>{label}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={16} color={colors.subtle} />
+    </TouchableOpacity>
   );
 }
 
@@ -508,6 +601,24 @@ const styles = StyleSheet.create({
     fontSize: fontSize.md,
     color: colors.error,
   },
+  // Legal
+  legalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.sm + 2,
+  },
+  rowIconLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  legalLabel: {
+    fontFamily: fonts.sans,
+    fontSize: fontSize.md,
+    color: colors.silver,
+  },
+
   footer: {
     fontFamily: fonts.mono,
     fontSize: fontSize.xs,

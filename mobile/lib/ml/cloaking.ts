@@ -111,7 +111,7 @@ export async function isModelReady(): Promise<boolean> {
 export function getModelInfo() {
   return {
     name: 'void-cloak-v1',
-    version: '0.1.0-placeholder',
-    engineType: 'simulated' as const,
+    version: '1.0.0',
+    engineType: 'server-side' as const,
   };
 }

@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Dimensions,
-  ActivityIndicator,
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,7 +19,7 @@ import { StatusBadge } from '../../components/ui/StatusBadge';
 import { GlassCard } from '../../components/ui/GlassCard';
 import { useSettingsStore } from '../../lib/store/useSettingsStore';
 import { useAuthStore } from '../../lib/store/useAuthStore';
-import { cloakImage, cloakVideo } from '../../lib/ml/cloaking';
+import { useCloakStore } from '../../lib/store/useCloakStore';
 import { getTierForStatus } from '../../lib/constants/subscriptions';
 import type { CloakMode } from '../../lib/types';
 import {
@@ -33,19 +32,20 @@ import {
 
 const { width } = Dimensions.get('window');
 
-type ImportState = 'idle' | 'imported' | 'processing' | 'done' | 'error';
+type ImportState = 'idle' | 'imported';
 
 export default function HomeScreen() {
   const router = useRouter();
   const [importState, setImportState] = useState<ImportState>('idle');
   const [importedUri, setImportedUri] = useState<string | null>(null);
   const [importedType, setImportedType] = useState<CloakMode>('photo');
-  const [processingTime, setProcessingTime] = useState<number | null>(null);
-  const [videoProgress, setVideoProgress] = useState(0);
 
   const strength = useSettingsStore((s) => s.strength);
   const user = useAuthStore((s) => s.user);
   const tier = getTierForStatus(user?.subscriptionStatus ?? 'none');
+  const cloakStore = useCloakStore();
+  const recentImages = cloakStore.getRecentImages(3);
+  const avgTime = cloakStore.getAverageTime();
 
   const handleImportPhoto = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -89,42 +89,37 @@ export default function HomeScreen() {
     }
   };
 
-  const handleCloak = async () => {
+  const handleCloak = () => {
     if (!importedUri) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    setImportState('processing');
-    setProcessingTime(null);
-    setVideoProgress(0);
-
-    try {
-      if (importedType === 'video') {
-        const result = await cloakVideo(importedUri, strength, (p) =>
-          setVideoProgress(p)
-        );
-        setProcessingTime(result.processingTimeMs);
-      } else {
-        const result = await cloakImage(importedUri, strength);
-        setProcessingTime(result.processingTimeMs);
-      }
-      setImportState('done');
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch {
-      setImportState('error');
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    }
+    // Navigate to full-screen processing modal
+    router.push({
+      pathname: '/processing-modal',
+      params: { imageUri: importedUri, strength },
+    });
+    // Reset import state so when user comes back, it's clean
+    setImportState('idle');
+    setImportedUri(null);
   };
 
   const handleReset = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setImportState('idle');
     setImportedUri(null);
-    setProcessingTime(null);
-    setVideoProgress(0);
   };
 
   const cloaksRemaining =
     tier.limits.monthlyCloak === -1
       ? 'Unlimited'
-      : `${tier.limits.monthlyCloak}`;
+      : `${Math.max(0, tier.limits.monthlyCloak - cloakStore.totalCloaked)}`;
+
+  const timeAgo = (ts: number) => {
+    const diff = Date.now() - ts;
+    if (diff < 60000) return 'just now';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    return `${Math.floor(diff / 86400000)}d ago`;
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -160,7 +155,7 @@ export default function HomeScreen() {
                 <Text style={styles.statLabel}>CLOAKED</Text>
                 <View style={styles.statValueRow}>
                   <View style={[styles.statDot, { backgroundColor: colors.success }]} />
-                  <Text style={styles.statValue}>0</Text>
+                  <Text style={styles.statValue}>{cloakStore.totalCloaked}</Text>
                 </View>
               </View>
 
@@ -187,150 +182,54 @@ export default function HomeScreen() {
                 <Text style={styles.statLabel}>AVG TIME</Text>
                 <View style={styles.statValueRow}>
                   <View style={[styles.statDot, { backgroundColor: colors.silver }]} />
-                  <Text style={styles.statValue}>{'\u2014'}</Text>
+                  <Text style={styles.statValue}>
+                    {avgTime > 0 ? `${(avgTime / 1000).toFixed(1)}s` : '\u2014'}
+                  </Text>
                 </View>
               </View>
             </View>
           </LinearGradient>
         </View>
 
-        {/* Import Preview / Processing Inline */}
-        {importState !== 'idle' && (
+        {/* Import Preview */}
+        {importState === 'imported' && importedUri && (
           <GlassCard style={styles.importCard}>
-            {/* Imported preview */}
-            {importState === 'imported' && importedUri && (
-              <View style={styles.importPreviewContainer}>
-                <View style={styles.importPreviewImageWrap}>
-                  <Image
-                    source={{ uri: importedUri }}
-                    style={styles.importPreviewImage}
-                    contentFit="cover"
+            <View style={styles.importPreviewContainer}>
+              <View style={styles.importPreviewImageWrap}>
+                <Image
+                  source={{ uri: importedUri }}
+                  style={styles.importPreviewImage}
+                  contentFit="cover"
+                />
+                <View style={styles.importTypeBadge}>
+                  <Ionicons
+                    name={importedType === 'video' ? 'videocam' : 'image'}
+                    size={11}
+                    color={colors.white}
                   />
-                  <View style={styles.importTypeBadge}>
-                    <Ionicons
-                      name={
-                        importedType === 'video' ? 'videocam' : 'image'
-                      }
-                      size={11}
-                      color={colors.white}
-                    />
-                    <Text style={styles.importTypeBadgeText}>
-                      {importedType === 'video' ? 'VIDEO' : 'PHOTO'}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.importActions}>
-                  <TouchableOpacity
-                    style={styles.cloakNowButton}
-                    onPress={handleCloak}
-                    activeOpacity={0.7}
-                  >
-                    <FontAwesome5
-                      name="shield-alt"
-                      size={14}
-                      color={colors.black}
-                    />
-                    <Text style={styles.cloakNowText}>Cloak Now</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.cancelImportButton}
-                    onPress={handleReset}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons
-                      name="close"
-                      size={16}
-                      color={colors.muted}
-                    />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-
-            {/* Processing */}
-            {importState === 'processing' && (
-              <View style={styles.processingContainer}>
-                <ActivityIndicator size="small" color={colors.white} />
-                <View style={styles.processingInfo}>
-                  <Text style={styles.processingText}>CLOAKING...</Text>
-                  <Text style={styles.processingHint}>
-                    {importedType === 'video'
-                      ? `Processing frames — ${Math.round(videoProgress * 100)}%`
-                      : 'Applying adversarial perturbation'}
+                  <Text style={styles.importTypeBadgeText}>
+                    {importedType === 'video' ? 'VIDEO' : 'PHOTO'}
                   </Text>
                 </View>
-                {importedType === 'video' && (
-                  <View style={styles.progressBar}>
-                    <View
-                      style={[
-                        styles.progressFill,
-                        { width: `${videoProgress * 100}%` },
-                      ]}
-                    />
-                  </View>
-                )}
               </View>
-            )}
-
-            {/* Done */}
-            {importState === 'done' && (
-              <View style={styles.doneContainer}>
-                <Ionicons
-                  name="checkmark-circle"
-                  size={28}
-                  color={colors.success}
-                />
-                <View style={styles.doneInfo}>
-                  <Text style={styles.doneText}>CLOAKED</Text>
-                  {processingTime && (
-                    <Text style={styles.doneHint}>
-                      {processingTime}ms · {strength}
-                    </Text>
-                  )}
-                </View>
+              <View style={styles.importActions}>
                 <TouchableOpacity
-                  style={styles.newCloakButton}
+                  style={styles.cloakNowButton}
+                  onPress={handleCloak}
+                  activeOpacity={0.7}
+                >
+                  <FontAwesome5 name="shield-alt" size={14} color={colors.black} />
+                  <Text style={styles.cloakNowText}>Cloak Now</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.cancelImportButton}
                   onPress={handleReset}
                   activeOpacity={0.7}
                 >
-                  <Ionicons
-                    name="refresh"
-                    size={14}
-                    color={colors.silver}
-                  />
-                  <Text style={styles.newCloakText}>NEW</Text>
+                  <Ionicons name="close" size={16} color={colors.muted} />
                 </TouchableOpacity>
               </View>
-            )}
-
-            {/* Error */}
-            {importState === 'error' && (
-              <View style={styles.doneContainer}>
-                <Ionicons
-                  name="close-circle"
-                  size={28}
-                  color={colors.error}
-                />
-                <View style={styles.doneInfo}>
-                  <Text style={[styles.doneText, { color: colors.error }]}>
-                    FAILED
-                  </Text>
-                  <Text style={styles.doneHint}>No face detected</Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.newCloakButton}
-                  onPress={handleReset}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons
-                    name="refresh"
-                    size={14}
-                    color={colors.silver}
-                  />
-                  <Text style={styles.newCloakText}>RETRY</Text>
-                </TouchableOpacity>
-              </View>
-            )}
+            </View>
           </GlassCard>
         )}
 
@@ -342,7 +241,10 @@ export default function HomeScreen() {
 
         <TouchableOpacity
           activeOpacity={0.7}
-          onPress={() => router.push('/camera-modal')}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            router.push('/camera-modal');
+          }}
         >
           <GlassCard style={styles.actionCard}>
             <View style={styles.actionRow}>
@@ -364,7 +266,10 @@ export default function HomeScreen() {
           </GlassCard>
         </TouchableOpacity>
 
-        <TouchableOpacity activeOpacity={0.7} onPress={handleImportPhoto}>
+        <TouchableOpacity activeOpacity={0.7} onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          handleImportPhoto();
+        }}>
           <GlassCard style={styles.actionCard}>
             <View style={styles.actionRow}>
               <View
@@ -390,7 +295,14 @@ export default function HomeScreen() {
           </GlassCard>
         </TouchableOpacity>
 
-        <TouchableOpacity activeOpacity={0.7} onPress={handleImportVideo}>
+        <TouchableOpacity activeOpacity={0.7} onPress={() => {
+          if (!tier.limits.videoCloaking) {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          } else {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          }
+          handleImportVideo();
+        }}>
           <GlassCard style={styles.actionCard}>
             <View style={styles.actionRow}>
               <View
@@ -483,13 +395,45 @@ export default function HomeScreen() {
           <Text style={styles.sectionTitle}>RECENT ACTIVITY</Text>
         </View>
 
-        <GlassCard style={styles.emptyActivity}>
-          <Ionicons name="pulse-outline" size={32} color={colors.subtle} />
-          <Text style={styles.emptyActivityText}>No recent activity</Text>
-          <Text style={styles.emptyActivityHint}>
-            Your cloaking history will appear here
-          </Text>
-        </GlassCard>
+        {recentImages.length === 0 ? (
+          <GlassCard style={styles.emptyActivity}>
+            <View style={styles.emptyActivityRow}>
+              <View style={styles.emptyTimelineBar} />
+              <View style={styles.emptyTimelineDot} />
+              <View style={styles.emptyActivityContent}>
+                <Text style={styles.emptyActivityText}>No activity yet</Text>
+                <Text style={styles.emptyActivityHint}>
+                  Cloaked photos and videos will appear here
+                </Text>
+              </View>
+            </View>
+          </GlassCard>
+        ) : (
+          <GlassCard style={styles.emptyActivity}>
+            {recentImages.map((img, i) => (
+              <View key={img.id} style={styles.activityItemRow}>
+                <View style={styles.emptyTimelineBar} />
+                <View style={[styles.emptyTimelineDot, { backgroundColor: colors.success, borderColor: colors.success }]} />
+                <Image
+                  source={{ uri: img.cloakedUri }}
+                  style={styles.activityThumb}
+                  contentFit="cover"
+                />
+                <View style={styles.activityItemContent}>
+                  <Text style={styles.activityItemTitle}>
+                    {img.facesCloaked} face{img.facesCloaked !== 1 ? 's' : ''} cloaked
+                  </Text>
+                  <Text style={styles.emptyActivityHint}>
+                    {img.strength} · {(img.processingTimeMs / 1000).toFixed(1)}s · {timeAgo(img.timestamp)}
+                  </Text>
+                </View>
+                {img.savedToGallery && (
+                  <Ionicons name="checkmark-circle" size={14} color={colors.success} />
+                )}
+              </View>
+            ))}
+          </GlassCard>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -744,6 +688,57 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
 
+  // Done — full state with compare
+  doneContainerFull: {
+    gap: spacing.md,
+  },
+  compareRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  compareItem: {
+    flex: 1,
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  compareLabel: {
+    fontFamily: fonts.monoBold,
+    fontSize: 9,
+    color: colors.muted,
+    letterSpacing: 2,
+  },
+  compareImage: {
+    width: '100%',
+    aspectRatio: 1,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  compareArrow: {
+    paddingTop: spacing.md,
+  },
+  doneStats: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: spacing.lg,
+  },
+  doneStat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  doneStatText: {
+    fontFamily: fonts.mono,
+    fontSize: fontSize.xs,
+    color: colors.silver,
+    letterSpacing: 0.5,
+  },
+  doneActions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+
   // Action Cards
   actionCard: {
     marginHorizontal: spacing.lg,
@@ -827,19 +822,62 @@ const styles = StyleSheet.create({
   // Recent Activity
   emptyActivity: {
     marginHorizontal: spacing.lg,
+  },
+  emptyActivityRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    paddingVertical: spacing.xl,
+    gap: spacing.md,
+  },
+  emptyTimelineBar: {
+    position: 'absolute',
+    left: 7,
+    top: -spacing.md,
+    bottom: -spacing.md,
+    width: 1,
+    backgroundColor: colors.border,
+  },
+  emptyTimelineDot: {
+    width: 15,
+    height: 15,
+    borderRadius: 8,
+    backgroundColor: colors.subtle,
+    borderWidth: 2,
+    borderColor: colors.border,
+  },
+  emptyActivityContent: {
+    flex: 1,
+    gap: 2,
   },
   emptyActivityText: {
     fontFamily: fonts.sansSemiBold,
-    fontSize: fontSize.md,
+    fontSize: fontSize.sm,
     color: colors.silver,
   },
   emptyActivityHint: {
     fontFamily: fonts.sans,
     fontSize: fontSize.xs,
     color: colors.muted,
-    textAlign: 'center',
+  },
+  activityItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  activityThumb: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  activityItemContent: {
+    flex: 1,
+    gap: 2,
+  },
+  activityItemTitle: {
+    fontFamily: fonts.sansSemiBold,
+    fontSize: fontSize.sm,
+    color: colors.silver,
   },
 });

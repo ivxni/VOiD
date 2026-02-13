@@ -8,11 +8,11 @@ import {
   Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { FontAwesome5, FontAwesome6, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { FontAwesome5, FontAwesome6, Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { GlassCard } from '../components/ui/GlassCard';
-import { Button } from '../components/ui/Button';
 import { TIERS } from '../lib/constants/subscriptions';
 import type { SubscriptionTier } from '../lib/constants/subscriptions';
 import {
@@ -27,77 +27,22 @@ const { width } = Dimensions.get('window');
 
 type BillingCycle = 'monthly' | 'yearly';
 
-// Feature comparison rows with icons
 const FEATURE_ROWS: {
-  icon: React.ReactNode;
+  icon: string;
+  iconSet: 'fa5' | 'ion';
   label: string;
   free: string;
   pro: string;
   proplus: string;
 }[] = [
-  {
-    icon: <FontAwesome5 name="shield-alt" size={14} color={colors.accent} />,
-    label: 'Monthly cloaks',
-    free: '3',
-    pro: 'Unlimited',
-    proplus: 'Unlimited',
-  },
-  {
-    icon: <Ionicons name="videocam-outline" size={16} color={colors.accent} />,
-    label: 'Video cloaking',
-    free: '—',
-    pro: '—',
-    proplus: 'Yes',
-  },
-  {
-    icon: <Ionicons name="speedometer-outline" size={16} color={colors.accent} />,
-    label: 'Strength levels',
-    free: 'Standard',
-    pro: 'All',
-    proplus: 'All + Custom',
-  },
-  {
-    icon: <Ionicons name="images-outline" size={16} color={colors.accent} />,
-    label: 'Batch processing',
-    free: '—',
-    pro: '—',
-    proplus: 'Up to 50',
-  },
-  {
-    icon: <Ionicons name="camera-outline" size={16} color={colors.accent} />,
-    label: 'Auto-cloak roll',
-    free: '—',
-    pro: '—',
-    proplus: 'Yes',
-  },
-  {
-    icon: <FontAwesome5 name="expand-arrows-alt" size={14} color={colors.accent} />,
-    label: 'Export quality',
-    free: 'Standard',
-    pro: 'Full HD',
-    proplus: 'RAW',
-  },
-  {
-    icon: <Ionicons name="flash-outline" size={16} color={colors.accent} />,
-    label: 'Priority engine',
-    free: '—',
-    pro: 'Yes',
-    proplus: 'Yes',
-  },
-  {
-    icon: <Ionicons name="bar-chart-outline" size={16} color={colors.accent} />,
-    label: 'Analytics',
-    free: '—',
-    pro: 'Basic',
-    proplus: 'Advanced',
-  },
-  {
-    icon: <FontAwesome5 name="flask" size={14} color={colors.accent} />,
-    label: 'Early access',
-    free: '—',
-    pro: '—',
-    proplus: 'Yes',
-  },
+  { icon: 'shield-alt', iconSet: 'fa5', label: 'Monthly cloaks', free: '3', pro: '\u221E', proplus: '\u221E' },
+  { icon: 'videocam-outline', iconSet: 'ion', label: 'Video cloaking', free: '\u2014', pro: '\u2014', proplus: '\u2713' },
+  { icon: 'speedometer-outline', iconSet: 'ion', label: 'Strength levels', free: '1', pro: 'All', proplus: 'All+' },
+  { icon: 'images-outline', iconSet: 'ion', label: 'Batch process', free: '\u2014', pro: '\u2014', proplus: '50' },
+  { icon: 'camera-outline', iconSet: 'ion', label: 'Auto-cloak', free: '\u2014', pro: '\u2014', proplus: '\u2713' },
+  { icon: 'expand-arrows-alt', iconSet: 'fa5', label: 'Export quality', free: 'SD', pro: 'HD', proplus: 'RAW' },
+  { icon: 'flash-outline', iconSet: 'ion', label: 'Priority engine', free: '\u2014', pro: '\u2713', proplus: '\u2713' },
+  { icon: 'bar-chart-outline', iconSet: 'ion', label: 'Analytics', free: '\u2014', pro: 'Basic', proplus: 'Full' },
 ];
 
 export default function UpgradeScreen() {
@@ -115,19 +60,24 @@ export default function UpgradeScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.closeButton}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="close" size={24} color={colors.silver} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Upgrade</Text>
-        <View style={styles.closeButton} />
-      </View>
+    <View style={styles.container}>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              router.back();
+            }}
+            style={styles.closeButton}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="close" size={22} color={colors.silver} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Upgrade</Text>
+          <View style={styles.headerSpacer} />
+        </View>
+      </SafeAreaView>
 
       <ScrollView
         style={styles.scroll}
@@ -136,200 +86,276 @@ export default function UpgradeScreen() {
       >
         {/* Hero */}
         <View style={styles.hero}>
-          <View style={styles.heroIconContainer}>
-            <FontAwesome5 name="shield-alt" size={32} color={colors.white} />
+          <View style={styles.heroIconOuter}>
+            <LinearGradient
+              colors={['rgba(255,255,255,0.12)', 'rgba(255,255,255,0.03)', 'rgba(0,0,0,0)']}
+              locations={[0, 0.5, 1]}
+              start={{ x: 0.3, y: 0 }}
+              end={{ x: 0.7, y: 1 }}
+              style={styles.heroIconGradient}
+            >
+              <View style={styles.heroIconInner}>
+                <FontAwesome5 name="bolt" size={28} color={colors.white} />
+              </View>
+            </LinearGradient>
           </View>
-          <Text style={styles.heroTitle}>Unlock Full{'\n'}Protection</Text>
+          <Text style={styles.heroTitle}>Unlock Full Protection</Text>
           <Text style={styles.heroSubtitle}>
-            Get unlimited cloaking and advanced features{'\n'}to keep your identity safe everywhere.
+            Unlimited cloaking and advanced features{'\n'}to keep your identity safe.
           </Text>
         </View>
 
         {/* Tier Selector */}
         <View style={styles.tierSelector}>
+          {/* Pro Card */}
           <TouchableOpacity
-            style={[
-              styles.tierTab,
-              selectedTier === 'pro' && styles.tierTabActive,
-            ]}
+            style={styles.tierCardOuter}
             onPress={() => {
-              setSelectedTier('pro');
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setSelectedTier('pro');
             }}
             activeOpacity={0.7}
           >
-            <Text
-              style={[
-                styles.tierTabName,
-                selectedTier === 'pro' && styles.tierTabNameActive,
-              ]}
+            <LinearGradient
+              colors={
+                selectedTier === 'pro'
+                  ? ['rgba(255,255,255,0.12)', 'rgba(255,255,255,0.04)', 'rgba(0,0,0,0)']
+                  : ['rgba(255,255,255,0.04)', 'rgba(0,0,0,0)']
+              }
+              locations={selectedTier === 'pro' ? [0, 0.5, 1] : [0, 1]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0.5, y: 1 }}
+              style={styles.tierCardGradient}
             >
-              Pro
-            </Text>
-            <Text style={styles.tierTabPrice}>
-              {billingCycle === 'yearly' ? '$59.99/yr' : '$7.99/mo'}
-            </Text>
+              <View style={[
+                styles.tierCardContent,
+                selectedTier === 'pro' && styles.tierCardContentActive,
+              ]}>
+                <FontAwesome5 name="bolt" size={14} color={selectedTier === 'pro' ? colors.white : colors.muted} />
+                <Text style={[styles.tierName, selectedTier === 'pro' && styles.tierNameActive]}>Pro</Text>
+                <Text style={styles.tierPrice}>
+                  {billingCycle === 'yearly' ? '$59.99' : '$7.99'}
+                  <Text style={styles.tierPricePeriod}>
+                    {billingCycle === 'yearly' ? '/yr' : '/mo'}
+                  </Text>
+                </Text>
+                {selectedTier === 'pro' && (
+                  <View style={styles.tierSelectedDot} />
+                )}
+              </View>
+            </LinearGradient>
           </TouchableOpacity>
 
+          {/* Pro+ Card */}
           <TouchableOpacity
-            style={[
-              styles.tierTab,
-              selectedTier === 'proplus' && styles.tierTabActive,
-            ]}
+            style={styles.tierCardOuter}
             onPress={() => {
-              setSelectedTier('proplus');
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setSelectedTier('proplus');
             }}
             activeOpacity={0.7}
           >
+            {/* Best Value Badge */}
             <View style={styles.bestValueBadge}>
               <Text style={styles.bestValueText}>BEST VALUE</Text>
             </View>
-            <Text
-              style={[
-                styles.tierTabName,
-                selectedTier === 'proplus' && styles.tierTabNameActive,
-              ]}
+            <LinearGradient
+              colors={
+                selectedTier === 'proplus'
+                  ? ['rgba(0,255,148,0.1)', 'rgba(255,255,255,0.04)', 'rgba(0,0,0,0)']
+                  : ['rgba(255,255,255,0.04)', 'rgba(0,0,0,0)']
+              }
+              locations={selectedTier === 'proplus' ? [0, 0.5, 1] : [0, 1]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0.5, y: 1 }}
+              style={styles.tierCardGradient}
             >
-              Pro+
-            </Text>
-            <Text style={styles.tierTabPrice}>
-              {billingCycle === 'yearly' ? '$119.99/yr' : '$14.99/mo'}
-            </Text>
+              <View style={[
+                styles.tierCardContent,
+                selectedTier === 'proplus' && styles.tierCardContentActive,
+              ]}>
+                <FontAwesome5 name="crown" size={14} color={selectedTier === 'proplus' ? colors.success : colors.muted} />
+                <Text style={[styles.tierName, selectedTier === 'proplus' && styles.tierNameActive]}>Pro+</Text>
+                <Text style={styles.tierPrice}>
+                  {billingCycle === 'yearly' ? '$119.99' : '$14.99'}
+                  <Text style={styles.tierPricePeriod}>
+                    {billingCycle === 'yearly' ? '/yr' : '/mo'}
+                  </Text>
+                </Text>
+                {selectedTier === 'proplus' && (
+                  <View style={[styles.tierSelectedDot, { backgroundColor: colors.success }]} />
+                )}
+              </View>
+            </LinearGradient>
           </TouchableOpacity>
         </View>
 
         {/* Billing Toggle */}
-        <View style={styles.billingToggle}>
-          <TouchableOpacity
-            style={[
-              styles.billingOption,
-              billingCycle === 'monthly' && styles.billingOptionActive,
-            ]}
-            onPress={() => setBillingCycle('monthly')}
-            activeOpacity={0.7}
+        <View style={styles.billingOuter}>
+          <LinearGradient
+            colors={['rgba(255,255,255,0.05)', 'rgba(0,0,0,0)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+            style={styles.billingGradient}
           >
-            <Text
-              style={[
-                styles.billingOptionText,
-                billingCycle === 'monthly' && styles.billingOptionTextActive,
-              ]}
-            >
-              Monthly
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.billingOption,
-              billingCycle === 'yearly' && styles.billingOptionActive,
-            ]}
-            onPress={() => setBillingCycle('yearly')}
-            activeOpacity={0.7}
-          >
-            <Text
-              style={[
-                styles.billingOptionText,
-                billingCycle === 'yearly' && styles.billingOptionTextActive,
-              ]}
-            >
-              Yearly
-            </Text>
-            {plan.yearlySavings && (
-              <View style={styles.saveBadge}>
-                <Text style={styles.saveText}>{plan.yearlySavings}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
+            <View style={styles.billingRow}>
+              <TouchableOpacity
+                style={[styles.billingOption, billingCycle === 'monthly' && styles.billingOptionActive]}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setBillingCycle('monthly');
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.billingText, billingCycle === 'monthly' && styles.billingTextActive]}>
+                  Monthly
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.billingOption, billingCycle === 'yearly' && styles.billingOptionActive]}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setBillingCycle('yearly');
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.billingText, billingCycle === 'yearly' && styles.billingTextActive]}>
+                  Yearly
+                </Text>
+                {plan.yearlySavings ? (
+                  <View style={styles.saveBadge}>
+                    <Text style={styles.saveText}>{plan.yearlySavings}</Text>
+                  </View>
+                ) : null}
+              </TouchableOpacity>
+            </View>
+          </LinearGradient>
         </View>
 
-        {/* Feature List for selected tier */}
-        <View style={styles.featuresSection}>
-          <Text style={styles.featuresSectionTitle}>WHAT YOU GET</Text>
+        {/* What You Get */}
+        <View style={styles.sectionHeader}>
+          <FontAwesome5 name="check-circle" size={10} color={colors.muted} />
+          <Text style={styles.sectionTitle}>WHAT YOU GET</Text>
+        </View>
+
+        <GlassCard style={styles.featureCard}>
           {plan.features.map((feature, i) => (
-            <View key={i} style={styles.featureItem}>
+            <View key={i} style={[styles.featureItem, i > 0 && styles.featureItemBorder]}>
               <View style={styles.featureCheck}>
-                <FontAwesome5 name="check" size={10} color={colors.success} />
+                <FontAwesome5 name="check" size={9} color={colors.success} />
               </View>
-              <Text style={styles.featureItemText}>{feature}</Text>
+              <Text style={styles.featureText}>{feature}</Text>
             </View>
           ))}
-        </View>
+        </GlassCard>
 
         {/* Comparison Table */}
-        <View style={styles.comparisonSection}>
-          <Text style={styles.featuresSectionTitle}>FULL COMPARISON</Text>
-          <GlassCard style={styles.comparisonCard} noPadding>
-            {/* Table Header */}
-            <View style={styles.tableHeader}>
-              <Text style={[styles.tableHeaderCell, styles.tableFeatureCol]}>Feature</Text>
-              <Text style={styles.tableHeaderCell}>Free</Text>
-              <Text style={[styles.tableHeaderCell, selectedTier === 'pro' && styles.tableHeaderCellActive]}>Pro</Text>
-              <Text style={[styles.tableHeaderCell, selectedTier === 'proplus' && styles.tableHeaderCellActive]}>Pro+</Text>
-            </View>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="grid-outline" size={11} color={colors.muted} />
+          <Text style={styles.sectionTitle}>FULL COMPARISON</Text>
+        </View>
 
-            {/* Table Rows */}
-            {FEATURE_ROWS.map((row, i) => (
-              <View
-                key={i}
-                style={[
-                  styles.tableRow,
-                  i % 2 === 0 && styles.tableRowAlt,
-                ]}
-              >
+        <GlassCard style={styles.tableCard} noPadding>
+          {/* Table Header */}
+          <View style={styles.tableHeader}>
+            <View style={styles.tableFeatureCol} />
+            <Text style={styles.tableHeaderCell}>Free</Text>
+            <Text style={[styles.tableHeaderCell, selectedTier === 'pro' && styles.tableHeaderActive]}>Pro</Text>
+            <Text style={[styles.tableHeaderCell, selectedTier === 'proplus' && styles.tableHeaderActive]}>Pro+</Text>
+          </View>
+
+          {/* Rows */}
+          {FEATURE_ROWS.map((row, i) => {
+            const Icon = row.iconSet === 'fa5' ? FontAwesome5 : Ionicons;
+            return (
+              <View key={i} style={[styles.tableRow, i % 2 === 0 && styles.tableRowAlt]}>
                 <View style={[styles.tableCell, styles.tableFeatureCol]}>
-                  {row.icon}
+                  <Icon name={row.icon as any} size={row.iconSet === 'fa5' ? 11 : 13} color={colors.muted} />
                   <Text style={styles.tableCellLabel} numberOfLines={1}>{row.label}</Text>
                 </View>
-                <Text style={[styles.tableCell, styles.tableCellValue, row.free === '—' && styles.tableCellMuted]}>
+                <Text style={[styles.tableCell, styles.tableCellValue, row.free === '\u2014' && styles.tableCellMuted]}>
                   {row.free}
                 </Text>
-                <Text style={[styles.tableCell, styles.tableCellValue, selectedTier === 'pro' && styles.tableCellHighlight]}>
+                <Text style={[
+                  styles.tableCell,
+                  styles.tableCellValue,
+                  selectedTier === 'pro' && styles.tableCellActive,
+                  row.pro === '\u2713' && selectedTier === 'pro' && styles.tableCellCheck,
+                ]}>
                   {row.pro}
                 </Text>
-                <Text style={[styles.tableCell, styles.tableCellValue, selectedTier === 'proplus' && styles.tableCellHighlight]}>
+                <Text style={[
+                  styles.tableCell,
+                  styles.tableCellValue,
+                  selectedTier === 'proplus' && styles.tableCellActive,
+                  row.proplus === '\u2713' && selectedTier === 'proplus' && styles.tableCellCheck,
+                ]}>
                   {row.proplus}
                 </Text>
               </View>
-            ))}
-          </GlassCard>
+            );
+          })}
+        </GlassCard>
+
+        {/* Trust Signals */}
+        <View style={styles.sectionHeader}>
+          <FontAwesome5 name="lock" size={10} color={colors.muted} />
+          <Text style={styles.sectionTitle}>TRUST</Text>
         </View>
 
-        {/* Social Proof */}
-        <View style={styles.socialProof}>
-          <View style={styles.proofRow}>
-            <FontAwesome5 name="lock" size={12} color={colors.success} />
-            <Text style={styles.proofText}>100% on-device. We never see your photos.</Text>
-          </View>
-          <View style={styles.proofRow}>
-            <Ionicons name="card-outline" size={14} color={colors.success} />
-            <Text style={styles.proofText}>Cancel anytime. No questions asked.</Text>
-          </View>
-          <View style={styles.proofRow}>
-            <FontAwesome6 name="apple" size={13} color={colors.success} />
-            <Text style={styles.proofText}>Secured by Apple In-App Purchase.</Text>
-          </View>
-        </View>
+        <GlassCard style={styles.trustCard}>
+          <TrustRow icon="lock" text="100% on-device. We never see your photos." />
+          <View style={styles.trustDivider} />
+          <TrustRow icon="card-outline" text="Cancel anytime. No questions asked." iconSet="ion" />
+          <View style={styles.trustDivider} />
+          <TrustRow icon="apple" text="Secured by Apple In-App Purchase." iconSet="fa6" />
+        </GlassCard>
 
-        {/* Spacer for button */}
-        <View style={{ height: 100 }} />
+        {/* Bottom spacer for CTA */}
+        <View style={{ height: 180 }} />
       </ScrollView>
 
       {/* Sticky CTA */}
-      <View style={styles.ctaContainer}>
-        <Button
-          title={`Subscribe — ${price}${period}`}
-          onPress={handleSubscribe}
-          variant="primary"
-          size="lg"
-          style={styles.ctaButton}
-        />
-        <Text style={styles.ctaHint}>
-          {billingCycle === 'yearly'
-            ? `That's just ${selectedTier === 'pro' ? '$4.99' : '$9.99'}/month`
-            : 'Switch to yearly to save more'}
-        </Text>
+      <LinearGradient
+        colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.95)', colors.black]}
+        locations={[0, 0.3, 0.5]}
+        style={styles.ctaGradient}
+      >
+        <View style={styles.ctaInner}>
+          <TouchableOpacity
+            style={styles.ctaButton}
+            onPress={handleSubscribe}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={['#FFFFFF', '#E0E0E0']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+              style={styles.ctaButtonGradient}
+            >
+              <Text style={styles.ctaButtonText}>Subscribe — {price}{period}</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+          <Text style={styles.ctaHint}>
+            {billingCycle === 'yearly'
+              ? `That\u2019s just ${selectedTier === 'pro' ? '$4.99' : '$9.99'}/month`
+              : 'Switch to yearly to save more'}
+          </Text>
+        </View>
+      </LinearGradient>
+    </View>
+  );
+}
+
+function TrustRow({ icon, text, iconSet = 'fa5' }: { icon: string; text: string; iconSet?: 'fa5' | 'fa6' | 'ion' }) {
+  const IconComponent = iconSet === 'ion' ? Ionicons : iconSet === 'fa6' ? FontAwesome6 : FontAwesome5;
+  return (
+    <View style={styles.trustRow}>
+      <View style={styles.trustIconWrap}>
+        <IconComponent name={icon as any} size={12} color={colors.success} />
       </View>
-    </SafeAreaView>
+      <Text style={styles.trustText}>{text}</Text>
+    </View>
   );
 }
 
@@ -338,23 +364,34 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.black,
   },
+  safeArea: {
+    zIndex: 10,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
   },
   closeButton: {
-    width: 40,
-    height: 40,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  headerSpacer: {
+    width: 36,
+    height: 36,
   },
   headerTitle: {
     fontFamily: fonts.sansSemiBold,
-    fontSize: fontSize.lg,
+    fontSize: fontSize.md,
     color: colors.white,
+    letterSpacing: 0.5,
   },
   scroll: {
     flex: 1,
@@ -366,35 +403,42 @@ const styles = StyleSheet.create({
   // Hero
   hero: {
     alignItems: 'center',
-    paddingTop: spacing.lg,
+    paddingTop: spacing.md,
     paddingBottom: spacing.xl,
   },
-  heroIconContainer: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: colors.accentGlow,
+  heroIconOuter: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    marginBottom: spacing.md,
+  },
+  heroIconGradient: {
+    width: '100%',
+    height: '100%',
+  },
+  heroIconInner: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
+    backgroundColor: 'rgba(14,14,14,0.85)',
   },
   heroTitle: {
     fontFamily: fonts.sansBold,
-    fontSize: fontSize.xxxl,
+    fontSize: fontSize.xxl,
     color: colors.white,
     textAlign: 'center',
-    lineHeight: fontSize.xxxl * 1.15,
     letterSpacing: -0.5,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.xs,
   },
   heroSubtitle: {
     fontFamily: fonts.sans,
-    fontSize: fontSize.md,
+    fontSize: fontSize.sm,
     color: colors.muted,
     textAlign: 'center',
-    lineHeight: fontSize.md * 1.5,
+    lineHeight: fontSize.sm * 1.5,
   },
 
   // Tier Selector
@@ -403,41 +447,64 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     marginBottom: spacing.md,
   },
-  tierTab: {
+  tierCardOuter: {
     flex: 1,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
     borderRadius: borderRadius.lg,
-    borderWidth: 1.5,
+    overflow: 'hidden',
+    borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.cardBg,
+  },
+  tierCardGradient: {
+    width: '100%',
+    flex: 1,
+  },
+  tierCardContent: {
+    flex: 1,
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.md,
+    backgroundColor: 'rgba(14,14,14,0.85)',
+    gap: spacing.xs,
   },
-  tierTabActive: {
-    borderColor: colors.white,
-    backgroundColor: colors.accentGlow,
+  tierCardContentActive: {
+    backgroundColor: 'rgba(14,14,14,0.75)',
   },
-  tierTabName: {
+  tierName: {
     fontFamily: fonts.sansBold,
     fontSize: fontSize.xl,
     color: colors.muted,
   },
-  tierTabNameActive: {
+  tierNameActive: {
     color: colors.white,
   },
-  tierTabPrice: {
+  tierPrice: {
+    fontFamily: fonts.monoBold,
+    fontSize: fontSize.md,
+    color: colors.silver,
+  },
+  tierPricePeriod: {
     fontFamily: fonts.mono,
-    fontSize: fontSize.sm,
+    fontSize: fontSize.xs,
     color: colors.muted,
-    marginTop: 4,
+  },
+  tierSelectedDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.white,
+    marginTop: 2,
   },
   bestValueBadge: {
     position: 'absolute',
-    top: -10,
+    top: -1,
+    alignSelf: 'center',
+    zIndex: 10,
     backgroundColor: colors.success,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: borderRadius.full,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 3,
+    borderBottomLeftRadius: borderRadius.sm,
+    borderBottomRightRadius: borderRadius.sm,
   },
   bestValueText: {
     fontFamily: fonts.monoBold,
@@ -447,12 +514,20 @@ const styles = StyleSheet.create({
   },
 
   // Billing Toggle
-  billingToggle: {
-    flexDirection: 'row',
-    backgroundColor: colors.darkGray,
+  billingOuter: {
     borderRadius: borderRadius.md,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.lg,
+  },
+  billingGradient: {
+    width: '100%',
+  },
+  billingRow: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(14,14,14,0.85)',
     padding: 3,
-    marginBottom: spacing.xl,
   },
   billingOption: {
     flex: 1,
@@ -461,17 +536,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: spacing.xs,
     paddingVertical: spacing.sm + 2,
-    borderRadius: borderRadius.md - 2,
+    borderRadius: borderRadius.sm,
   },
   billingOptionActive: {
-    backgroundColor: colors.surfaceBg,
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
-  billingOptionText: {
+  billingText: {
     fontFamily: fonts.sansMedium,
     fontSize: fontSize.sm,
     color: colors.muted,
   },
-  billingOptionTextActive: {
+  billingTextActive: {
     color: colors.white,
   },
   saveBadge: {
@@ -482,20 +557,28 @@ const styles = StyleSheet.create({
   },
   saveText: {
     fontFamily: fonts.monoBold,
-    fontSize: 9,
+    fontSize: 8,
     color: colors.success,
     letterSpacing: 0.5,
   },
 
-  // Features
-  featuresSection: {
-    marginBottom: spacing.xl,
+  // Section Headers
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+    marginTop: spacing.sm,
   },
-  featuresSectionTitle: {
+  sectionTitle: {
     fontFamily: fonts.mono,
     fontSize: fontSize.xs,
     color: colors.muted,
     letterSpacing: 2,
+  },
+
+  // Feature List
+  featureCard: {
     marginBottom: spacing.md,
   },
   featureItem: {
@@ -504,61 +587,64 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     paddingVertical: spacing.sm,
   },
+  featureItemBorder: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
   featureCheck: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: colors.successGlow,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  featureItemText: {
+  featureText: {
     fontFamily: fonts.sans,
-    fontSize: fontSize.md,
+    fontSize: fontSize.sm,
     color: colors.silver,
     flex: 1,
   },
 
-  // Comparison Table
-  comparisonSection: {
-    marginBottom: spacing.xl,
-  },
-  comparisonCard: {
+  // Table
+  tableCard: {
+    marginBottom: spacing.md,
     overflow: 'hidden',
   },
   tableHeader: {
     flexDirection: 'row',
-    paddingVertical: spacing.sm + 2,
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
   tableHeaderCell: {
-    fontFamily: fonts.monoBold,
-    fontSize: fontSize.xs,
-    color: colors.muted,
     flex: 1,
+    fontFamily: fonts.monoBold,
+    fontSize: 9,
+    color: colors.muted,
     textAlign: 'center',
     letterSpacing: 1,
+    textTransform: 'uppercase',
   },
-  tableHeaderCellActive: {
+  tableHeaderActive: {
     color: colors.white,
   },
   tableFeatureCol: {
-    flex: 1.8,
+    flex: 1.6,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-    textAlign: 'left',
   },
   tableRow: {
     flexDirection: 'row',
-    paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.md,
     alignItems: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
   },
   tableRowAlt: {
-    backgroundColor: 'rgba(255,255,255,0.02)',
+    backgroundColor: 'rgba(255,255,255,0.015)',
   },
   tableCell: {
     flex: 1,
@@ -573,50 +659,77 @@ const styles = StyleSheet.create({
   tableCellValue: {
     fontFamily: fonts.mono,
     fontSize: fontSize.xs,
-    color: colors.silver,
+    color: colors.muted,
     textAlign: 'center',
   },
   tableCellMuted: {
     color: colors.subtle,
   },
-  tableCellHighlight: {
-    color: colors.white,
+  tableCellActive: {
+    color: colors.silver,
+  },
+  tableCellCheck: {
+    color: colors.success,
   },
 
-  // Social Proof
-  socialProof: {
-    gap: spacing.md,
-    paddingVertical: spacing.md,
+  // Trust
+  trustCard: {
+    marginBottom: spacing.md,
   },
-  proofRow: {
+  trustRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm + 2,
+    gap: spacing.md,
+    paddingVertical: spacing.xs,
   },
-  proofText: {
+  trustIconWrap: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.successGlow,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  trustText: {
     fontFamily: fonts.sans,
     fontSize: fontSize.sm,
     color: colors.muted,
+    flex: 1,
+  },
+  trustDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: spacing.xs,
   },
 
   // CTA
-  ctaContainer: {
+  ctaGradient: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
+    paddingTop: spacing.xl,
+  },
+  ctaInner: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xl + 12,
-    backgroundColor: colors.black,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
     alignItems: 'center',
+    paddingBottom: spacing.xxl + spacing.md,
   },
   ctaButton: {
     width: '100%',
-    height: 56,
     borderRadius: 14,
+    overflow: 'hidden',
+  },
+  ctaButtonGradient: {
+    paddingVertical: spacing.md + 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ctaButtonText: {
+    fontFamily: fonts.sansBold,
+    fontSize: fontSize.md,
+    color: colors.black,
+    letterSpacing: 0.3,
   },
   ctaHint: {
     fontFamily: fonts.mono,

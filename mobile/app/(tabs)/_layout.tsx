@@ -64,9 +64,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.charcoal,
     borderTopWidth: 0,
     elevation: 0,
-    height: 80,
+    height: 85,
     paddingTop: 6,
-    paddingBottom: 24,
+    paddingBottom: 22,
   },
   tabLabel: {
     fontFamily: fonts.mono,

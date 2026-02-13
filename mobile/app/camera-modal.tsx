@@ -14,7 +14,7 @@ import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { useSettingsStore } from '../lib/store/useSettingsStore';
-import { cloakImage } from '../lib/ml/cloaking';
+import { cloakImageRemote } from '../lib/api/cloakService';
 import {
   colors,
   fonts,
@@ -85,7 +85,7 @@ export default function CameraModal() {
     setProcessingTime(null);
 
     try {
-      const result = await cloakImage(capturedUri, strength);
+      const result = await cloakImageRemote(capturedUri, strength);
       setProcessingTime(result.processingTimeMs);
       setState('done');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -96,12 +96,14 @@ export default function CameraModal() {
   };
 
   const handleRetake = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setCapturedUri(null);
     setProcessingTime(null);
     setState('camera');
   };
 
   const handleDone = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.back();
   };
 
@@ -125,7 +127,10 @@ export default function CameraModal() {
           </Text>
           <TouchableOpacity
             style={styles.permissionButton}
-            onPress={requestPermission}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              requestPermission();
+            }}
             activeOpacity={0.7}
           >
             <Text style={styles.permissionButtonText}>Allow Camera</Text>
@@ -149,7 +154,10 @@ export default function CameraModal() {
         <View style={styles.topBar}>
           <TouchableOpacity
             style={styles.topBarButton}
-            onPress={() => router.back()}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              router.back();
+            }}
             activeOpacity={0.7}
           >
             <Ionicons name="close" size={26} color={colors.white} />
@@ -159,7 +167,10 @@ export default function CameraModal() {
             <View style={styles.topBarCenter}>
               <TouchableOpacity
                 style={styles.topBarButton}
-                onPress={() => setFlash((f) => !f)}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setFlash((f) => !f);
+                }}
                 activeOpacity={0.7}
               >
                 <Ionicons
@@ -174,9 +185,10 @@ export default function CameraModal() {
           {state === 'camera' && (
             <TouchableOpacity
               style={styles.topBarButton}
-              onPress={() =>
-                setFacing((f) => (f === 'back' ? 'front' : 'back'))
-              }
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                setFacing((f) => (f === 'back' ? 'front' : 'back'));
+              }}
               activeOpacity={0.7}
             >
               <Ionicons
@@ -201,7 +213,10 @@ export default function CameraModal() {
                 styles.aspectRatioPill,
                 aspectRatio === r.key && styles.aspectRatioPillActive,
               ]}
-              onPress={() => setAspectRatio(r.key)}
+              onPress={() => {
+                Haptics.selectionAsync();
+                setAspectRatio(r.key);
+              }}
               activeOpacity={0.7}
             >
               <Text

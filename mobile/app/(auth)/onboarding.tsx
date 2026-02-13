@@ -10,6 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { Button } from '../../components/ui/Button';
 import { useAuthStore } from '../../lib/store/useAuthStore';
 import {
@@ -61,9 +62,11 @@ export default function OnboardingScreen() {
 
   const handleNext = () => {
     if (currentIndex < slides.length - 1) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       flatListRef.current?.scrollToIndex({ index: currentIndex + 1 });
       setCurrentIndex(currentIndex + 1);
     } else {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       // Complete onboarding - mock user login
       setUser({
         id: 'demo-user',
@@ -103,6 +106,9 @@ export default function OnboardingScreen() {
           )}
           onMomentumScrollEnd={(e) => {
             const idx = Math.round(e.nativeEvent.contentOffset.x / width);
+            if (idx !== currentIndex) {
+              Haptics.selectionAsync();
+            }
             setCurrentIndex(idx);
           }}
         />

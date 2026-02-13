@@ -75,6 +75,14 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
+          name="processing-modal"
+          options={{
+            presentation: 'fullScreenModal',
+            animation: 'fade',
+            gestureEnabled: false,
+          }}
+        />
+        <Stack.Screen
           name="upgrade"
           options={{
             presentation: 'modal',

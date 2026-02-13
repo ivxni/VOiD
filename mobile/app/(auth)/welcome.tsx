@@ -8,6 +8,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { FontAwesome5, FontAwesome6, Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { Button } from '../../components/ui/Button';
 import {
   colors,
@@ -22,6 +23,7 @@ export default function WelcomeScreen() {
   const router = useRouter();
 
   const handleSignIn = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     // TODO: Implement Apple Sign In
     router.push('/(auth)/onboarding');
   };

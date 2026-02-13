@@ -40,10 +40,10 @@ const styles = StyleSheet.create({
   },
   gradient: {
     width: '100%',
+    backgroundColor: 'rgba(14,14,14,0.55)',
   },
   content: {
     padding: spacing.lg,
-    backgroundColor: 'rgba(14,14,14,0.85)',
   },
   noPadding: {
     padding: 0,

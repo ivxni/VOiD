@@ -5,6 +5,7 @@ FastAPI entry point. Run with:
     uvicorn app.main:app --reload --port 8000
 """
 
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +14,8 @@ from app.core.config import get_settings
 from app.db.database import init_db
 from app.api.v1.router import router as api_v1_router
 from app.api.v1.schemas import HealthResponse
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
 settings = get_settings()
 
