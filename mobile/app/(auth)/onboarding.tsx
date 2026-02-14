@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Button } from '../../components/ui/Button';
@@ -19,6 +20,8 @@ import {
   fontSize,
   spacing,
 } from '../../lib/constants/theme';
+
+const ONBOARDING_KEY = 'void_onboarding_complete';
 
 const { width } = Dimensions.get('window');
 
@@ -60,22 +63,16 @@ export default function OnboardingScreen() {
   const scrollX = useRef(new Animated.Value(0)).current;
   const flatListRef = useRef<FlatList>(null);
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (currentIndex < slides.length - 1) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       flatListRef.current?.scrollToIndex({ index: currentIndex + 1 });
       setCurrentIndex(currentIndex + 1);
     } else {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      // Complete onboarding - mock user login
-      setUser({
-        id: 'demo-user',
-        appleSubjectId: 'demo-apple-id',
-        isPremium: false,
-        subscriptionStatus: 'none',
-        createdAt: new Date().toISOString(),
-        lastLogin: new Date().toISOString(),
-      });
+      // Mark onboarding as complete — auth guard will redirect to home
+      await AsyncStorage.setItem(ONBOARDING_KEY, 'true');
+      router.replace('/(tabs)/home');
     }
   };
 

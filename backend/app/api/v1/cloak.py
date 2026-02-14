@@ -68,6 +68,19 @@ class CloakResponse(BaseModel):
     processing_time_ms: int
     width: int
     height: int
+    model_guided: bool = Field(
+        False,
+        description="True if SFace model-guided perturbation was used",
+    )
+    avg_embedding_distance: float = Field(
+        0.0,
+        description="Average cosine distance between original and cloaked "
+        "face embeddings (0-1). Higher = more effective disruption.",
+    )
+    embedding_distances: list[float] = Field(
+        default_factory=list,
+        description="Per-face cosine distances in embedding space",
+    )
     analysis_image: str | None = Field(
         None,
         description="Base64-encoded AI analysis visualization (JPEG). "
@@ -176,6 +189,9 @@ async def cloak_endpoint(request: CloakRequest):
         processing_time_ms=processing_time_ms,
         width=metadata["width"],
         height=metadata["height"],
+        model_guided=metadata.get("model_guided", False),
+        avg_embedding_distance=metadata.get("avg_embedding_distance", 0.0),
+        embedding_distances=metadata.get("embedding_distances", []),
         analysis_image=analysis_b64,
     )
 
@@ -184,6 +200,7 @@ class CloakStatusResponse(BaseModel):
     """Server cloaking capability status."""
     available: bool
     engine: str
+    model_guided: bool
     supported_strengths: list[str]
     max_image_size_mb: int
 
@@ -191,9 +208,12 @@ class CloakStatusResponse(BaseModel):
 @router.get("/status", response_model=CloakStatusResponse)
 async def cloak_status():
     """Check if the cloaking engine is available and ready."""
+    from app.ml.face_cloaker import _ensure_recognizer
+    model_ok = _ensure_recognizer()
     return CloakStatusResponse(
         available=True,
-        engine="void-cloak-v1",
+        engine="void-cloak-v2-spsa" if model_ok else "void-cloak-v1-untargeted",
+        model_guided=model_ok,
         supported_strengths=["subtle", "standard", "maximum"],
         max_image_size_mb=20,
     )

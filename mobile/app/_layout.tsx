@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   useFonts,
   Inter_400Regular,
@@ -17,6 +18,8 @@ import {
 import { useAuthStore } from '../lib/store/useAuthStore';
 import { colors } from '../lib/constants/theme';
 
+const ONBOARDING_KEY = 'void_onboarding_complete';
+
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     Inter_400Regular,
@@ -28,31 +31,53 @@ export default function RootLayout() {
     JetBrainsMono_700Bold,
   });
 
-  const { isAuthenticated, isLoading, setLoading } = useAuthStore();
+  const { isAuthenticated, isLoading, restoreSession } = useAuthStore();
+  const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(null);
   const segments = useSegments();
   const router = useRouter();
 
-  // On first launch, check for stored session
-  // For now, just mark loading as done so the app can render
+  // On first launch, restore saved session + check onboarding flag
   useEffect(() => {
-    // TODO: In production, check AsyncStorage for a saved token here
-    // and restore the session before setting loading to false
-    setLoading(false);
+    const init = async () => {
+      await restoreSession();
+      const flag = await AsyncStorage.getItem(ONBOARDING_KEY);
+      setOnboardingComplete(flag === 'true');
+    };
+    init();
   }, []);
 
+  // Navigation guard
   useEffect(() => {
-    if (isLoading || !fontsLoaded) return;
+    if (isLoading || !fontsLoaded || onboardingComplete === null) return;
 
     const inAuthGroup = segments[0] === '(auth)';
+    const inTabs = segments[0] === '(tabs)';
+    const inOnboarding = inAuthGroup && segments[1] === 'onboarding';
+    // Root-level screens (modals, upgrade) that authenticated users can access
+    const isAppScreen = inTabs
+      || segments[0] === 'processing-modal'
+      || segments[0] === 'camera-modal'
+      || segments[0] === 'upgrade';
 
-    if (!isAuthenticated && !inAuthGroup) {
-      router.replace('/(auth)/welcome');
-    } else if (isAuthenticated && inAuthGroup) {
-      router.replace('/(tabs)/home');
+    if (!isAuthenticated) {
+      // Not logged in → go to welcome (unless already there)
+      if (!inAuthGroup) {
+        router.replace('/(auth)/welcome');
+      }
+    } else if (!onboardingComplete) {
+      // Logged in but hasn't completed onboarding → show onboarding
+      if (!inOnboarding) {
+        router.replace('/(auth)/onboarding');
+      }
+    } else {
+      // Logged in + onboarding done → go to home only if on auth pages or bare index
+      if (!isAppScreen) {
+        router.replace('/(tabs)/home');
+      }
     }
-  }, [isAuthenticated, isLoading, fontsLoaded, segments]);
+  }, [isAuthenticated, isLoading, fontsLoaded, onboardingComplete, segments]);
 
-  if (!fontsLoaded || isLoading) {
+  if (!fontsLoaded || isLoading || onboardingComplete === null) {
     return <View style={styles.loading} />;
   }
 

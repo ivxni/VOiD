@@ -1,15 +1,19 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Dimensions,
+  Alert,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { FontAwesome5, FontAwesome6, Ionicons } from '@expo/vector-icons';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Haptics from 'expo-haptics';
 import { Button } from '../../components/ui/Button';
+import { useAuthStore } from '../../lib/store/useAuthStore';
 import {
   colors,
   fonts,
@@ -21,11 +25,57 @@ const { width } = Dimensions.get('window');
 
 export default function WelcomeScreen() {
   const router = useRouter();
+  const login = useAuthStore((s) => s.login);
+  const [isSigningIn, setIsSigningIn] = useState(false);
 
-  const handleSignIn = () => {
+  const handleAppleSignIn = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    // TODO: Implement Apple Sign In
-    router.push('/(auth)/onboarding');
+
+    if (Platform.OS !== 'ios') {
+      Alert.alert('Not available', 'Apple Sign-In is only available on iOS.');
+      return;
+    }
+
+    setIsSigningIn(true);
+
+    try {
+      // Request Apple Sign-In
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+
+      if (!credential.identityToken) {
+        throw new Error('No identity token received from Apple');
+      }
+
+      // Send to our backend → creates user in DB → returns JWT
+      await login(credential.identityToken, credential.email);
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+      // Auth guard in _layout.tsx will detect isAuthenticated + !onboardingComplete
+      // and automatically redirect to onboarding. No manual navigation needed.
+    } catch (error: any) {
+      // User cancelled — not a real error
+      if (error?.code === 'ERR_REQUEST_CANCELED') {
+        setIsSigningIn(false);
+        return;
+      }
+
+      console.error('[Welcome] Apple Sign-In failed:', error);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+
+      Alert.alert(
+        'Sign-In Failed',
+        error?.message || 'Could not sign in with Apple. Please try again.',
+        [{ text: 'OK' }],
+      );
+    } finally {
+      setIsSigningIn(false);
+    }
   };
 
   return (
@@ -70,10 +120,11 @@ export default function WelcomeScreen() {
         <View style={styles.authSection}>
           <View style={styles.appleButton}>
             <Button
-              title="Continue with Apple"
-              onPress={handleSignIn}
+              title={isSigningIn ? 'Signing in...' : 'Continue with Apple'}
+              onPress={handleAppleSignIn}
               variant="primary"
               size="lg"
+              disabled={isSigningIn}
               icon={<FontAwesome6 name="apple" size={20} color={colors.black} />}
               style={styles.appleButtonInner}
             />

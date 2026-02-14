@@ -28,9 +28,27 @@ const GRID_GAP = spacing.xs;
 const COLS = 3;
 const THUMB_SIZE = (SW - spacing.lg * 2 - GRID_GAP * (COLS - 1)) / COLS;
 
+type DetailViewMode = 'cloaked' | 'ai';
+
 export default function GalleryScreen() {
-  const { images, markSaved } = useCloakStore();
+  const { images, markSaved, removeImage } = useCloakStore();
   const [selectedImage, setSelectedImage] = useState<CloakedImage | null>(null);
+  const [viewMode, setViewMode] = useState<DetailViewMode>('cloaked');
+  // Local save state — resets each time a new image is opened
+  const [justSaved, setJustSaved] = useState(false);
+
+  const openDetail = (img: CloakedImage) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedImage(img);
+    setViewMode('cloaked');
+    setJustSaved(false);
+  };
+
+  const closeDetail = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedImage(null);
+    setJustSaved(false);
+  };
 
   const handleSaveToDevice = async (img: CloakedImage) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -42,20 +60,25 @@ export default function GalleryScreen() {
     try {
       await MediaLibrary.saveToLibraryAsync(img.cloakedUri);
       markSaved(img.id);
+      setJustSaved(true);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch {
       Alert.alert('Error', 'Failed to save photo.');
     }
   };
 
+  // Which URI to display based on view mode
+  const displayUri = selectedImage
+    ? viewMode === 'ai' && selectedImage.analysisUri
+      ? selectedImage.analysisUri
+      : selectedImage.cloakedUri
+    : '';
+
   const renderThumb = ({ item }: { item: CloakedImage }) => (
     <TouchableOpacity
       style={styles.thumbWrap}
       activeOpacity={0.7}
-      onPress={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        setSelectedImage(item);
-      }}
+      onPress={() => openDetail(item)}
     >
       <Image source={{ uri: item.cloakedUri }} style={styles.thumb} contentFit="cover" />
       {item.savedToGallery && (
@@ -113,14 +136,11 @@ export default function GalleryScreen() {
       {selectedImage && (
         <View style={styles.detailOverlay}>
           <SafeAreaView edges={['top', 'bottom']} style={styles.detailSafe}>
-            {/* Top row: close + timestamp */}
+            {/* Top row: close + timestamp + delete */}
             <View style={styles.detailTopRow}>
               <TouchableOpacity
                 style={styles.detailClose}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setSelectedImage(null);
-                }}
+                onPress={closeDetail}
                 activeOpacity={0.7}
               >
                 <Ionicons name="close" size={18} color={colors.silver} />
@@ -131,18 +151,73 @@ export default function GalleryScreen() {
                   hour: '2-digit', minute: '2-digit',
                 })}
               </Text>
+              <TouchableOpacity
+                style={styles.detailDelete}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  Alert.alert(
+                    'Delete Photo',
+                    'Remove this cloaked photo from your history?',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Delete',
+                        style: 'destructive',
+                        onPress: () => {
+                          removeImage(selectedImage.id);
+                          setSelectedImage(null);
+                          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                        },
+                      },
+                    ],
+                  );
+                }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="trash-outline" size={16} color={colors.error} />
+              </TouchableOpacity>
             </View>
 
             {/* Image — contained card */}
             <View style={styles.detailImageWrap}>
               <View style={styles.detailImageCard}>
                 <Image
-                  source={{ uri: selectedImage.cloakedUri }}
+                  source={{ uri: displayUri }}
                   style={styles.detailImage}
                   contentFit="contain"
                   transition={200}
                 />
+                {/* AI badge */}
+                {viewMode === 'ai' && selectedImage.analysisUri && (
+                  <View style={styles.aiBadge}>
+                    <Text style={styles.aiBadgeText}>AI FEATURE ANALYSIS</Text>
+                  </View>
+                )}
               </View>
+
+              {/* CLOAKED / AI VIEW toggle */}
+              {selectedImage.analysisUri && (
+                <View style={styles.toggleRow}>
+                  <TouchableOpacity
+                    style={[styles.toggleBtn, viewMode === 'cloaked' && styles.toggleBtnActive]}
+                    onPress={() => { setViewMode('cloaked'); Haptics.selectionAsync(); }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.toggleText, viewMode === 'cloaked' && styles.toggleTextActive]}>
+                      CLOAKED
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.toggleBtn, viewMode === 'ai' && styles.toggleBtnAi]}
+                    onPress={() => { setViewMode('ai'); Haptics.selectionAsync(); }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.toggleText, viewMode === 'ai' && styles.toggleTextAi]}>
+                      AI VIEW
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
 
             {/* Bottom: stats + actions */}
@@ -157,21 +232,27 @@ export default function GalleryScreen() {
                 </View>
                 <View style={styles.detailStatDivider} />
                 <View style={styles.detailStat}>
+                  <Ionicons name="shield-checkmark" size={12} color={
+                    (selectedImage.avgEmbeddingDistance ?? 0) >= 0.3 ? colors.success
+                    : (selectedImage.avgEmbeddingDistance ?? 0) >= 0.15 ? '#FFD060'
+                    : colors.muted
+                  } />
+                  <Text style={styles.detailStatValue}>
+                    {Math.round((selectedImage.avgEmbeddingDistance ?? 0) * 100)}%
+                  </Text>
+                  <Text style={styles.detailStatLabel}>disruption</Text>
+                </View>
+                <View style={styles.detailStatDivider} />
+                <View style={styles.detailStat}>
                   <Ionicons name="timer-outline" size={12} color={colors.muted} />
                   <Text style={styles.detailStatValue}>
                     {(selectedImage.processingTimeMs / 1000).toFixed(1)}s
                   </Text>
                   <Text style={styles.detailStatLabel}>time</Text>
                 </View>
-                <View style={styles.detailStatDivider} />
-                <View style={styles.detailStat}>
-                  <FontAwesome5 name="sliders-h" size={10} color={colors.muted} />
-                  <Text style={styles.detailStatValue}>{selectedImage.strength}</Text>
-                  <Text style={styles.detailStatLabel}>strength</Text>
-                </View>
               </View>
 
-              {!selectedImage.savedToGallery ? (
+              {!justSaved ? (
                 <TouchableOpacity
                   style={styles.saveButton}
                   onPress={() => handleSaveToDevice(selectedImage)}
@@ -188,7 +269,7 @@ export default function GalleryScreen() {
               ) : (
                 <View style={styles.savedRow}>
                   <Ionicons name="checkmark-circle" size={16} color={colors.success} />
-                  <Text style={styles.savedText}>Saved to device</Text>
+                  <Text style={styles.savedText}>Saved to Device</Text>
                 </View>
               )}
             </View>
@@ -275,6 +356,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.06)',
     alignItems: 'center', justifyContent: 'center',
   },
+  detailDelete: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: 'rgba(255,59,48,0.1)',
+    alignItems: 'center', justifyContent: 'center',
+  },
   detailTimestamp: {
     fontFamily: fonts.mono, fontSize: 10, color: colors.muted, letterSpacing: 0.5,
   },
@@ -284,7 +370,8 @@ const styles = StyleSheet.create({
   },
   detailImageCard: {
     width: SW - spacing.lg * 2,
-    height: '90%',
+    flex: 1,
+    maxHeight: '80%',
     borderRadius: borderRadius.lg,
     overflow: 'hidden',
     backgroundColor: colors.charcoal,
@@ -292,6 +379,37 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.06)',
   },
   detailImage: { width: '100%', height: '100%' },
+
+  // AI badge
+  aiBadge: {
+    position: 'absolute', top: 8, left: 8,
+    backgroundColor: 'rgba(0,255,148,0.12)',
+    paddingHorizontal: 8, paddingVertical: 3,
+    borderRadius: borderRadius.sm,
+  },
+  aiBadgeText: {
+    fontFamily: fonts.monoBold, fontSize: 7, color: '#00FF94', letterSpacing: 1.5,
+  },
+
+  // Toggle (same style as processing modal)
+  toggleRow: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: borderRadius.full,
+    padding: 3, gap: 2, marginTop: spacing.md,
+  },
+  toggleBtn: {
+    paddingHorizontal: 14, paddingVertical: 7, borderRadius: borderRadius.full,
+  },
+  toggleBtnActive: { backgroundColor: 'rgba(255,255,255,0.1)' },
+  toggleBtnAi: { backgroundColor: 'rgba(0,255,148,0.1)' },
+  toggleText: {
+    fontFamily: fonts.monoBold, fontSize: 8, color: colors.muted, letterSpacing: 2,
+  },
+  toggleTextActive: { color: colors.white },
+  toggleTextAi: { color: '#00FF94' },
+
+  // Bottom
   detailBottom: {
     paddingHorizontal: spacing.lg, paddingBottom: spacing.sm, gap: spacing.md,
   },

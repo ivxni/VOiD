@@ -7,17 +7,47 @@ export interface User {
   email?: string;
   appleSubjectId: string;
   isPremium: boolean;
+  subscriptionTier: SubscriptionTier;
   subscriptionStatus: SubscriptionStatus;
+  billingCycle: BillingCycle | null;
+  subscriptionExpiresAt: string | null;
   createdAt: string;
   lastLogin: string;
 }
+
+export type SubscriptionTier = 'free' | 'pro' | 'proplus';
+
+export type BillingCycle = 'monthly' | 'yearly';
 
 export type SubscriptionStatus =
   | 'active'
   | 'expired'
   | 'trial'
+  | 'cancelled'
   | 'lifetime'
   | 'none';
+
+export interface SubscriptionInfo {
+  tier: SubscriptionTier;
+  billingCycle: BillingCycle | null;
+  status: SubscriptionStatus;
+  isPremium: boolean;
+  monthlyCloakLimit: number;
+  remainingCloaks: number;
+  features: TierFeatures;
+  expiresAt: string | null;
+}
+
+export interface TierFeatures {
+  strengthLevels: string[];
+  videoCloaking: boolean;
+  batchProcessing: boolean;
+  autoCloakRoll: boolean;
+  exportResolution: string;
+  priorityProcessing: boolean;
+  analyticsAccess: boolean;
+  customProfiles: boolean;
+}
 
 export interface CloakResult {
   /** URI to the cloaked image in local storage */

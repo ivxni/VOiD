@@ -18,8 +18,9 @@ import { GlassCard } from '../../components/ui/GlassCard';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { useAuthStore } from '../../lib/store/useAuthStore';
 import { useSettingsStore } from '../../lib/store/useSettingsStore';
+import { useSubscriptionStore } from '../../lib/store/useSubscriptionStore';
 import { getModelInfo } from '../../lib/ml/cloaking';
-import { getTierForStatus } from '../../lib/constants/subscriptions';
+import { TIERS } from '../../lib/constants/subscriptions';
 import type { CloakStrength } from '../../lib/types';
 import {
   colors,
@@ -48,7 +49,13 @@ export default function SettingsScreen() {
     setAutoSave,
   } = useSettingsStore();
   const modelInfo = getModelInfo();
-  const currentTier = getTierForStatus(user?.subscriptionStatus ?? 'none');
+  const { subscription, canUseStrength, refresh: refreshSubscription } = useSubscriptionStore();
+  const currentTier = TIERS[subscription.tier] || TIERS.free;
+
+  // Refresh subscription on mount
+  React.useEffect(() => {
+    refreshSubscription();
+  }, []);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -159,7 +166,7 @@ export default function SettingsScreen() {
           <Text style={styles.settingLabel}>Perturbation Strength</Text>
           <View style={styles.strengthOptions}>
             {STRENGTH_OPTIONS.map((opt) => {
-              const isLocked = !currentTier.limits.strengthLevels.includes(opt.key);
+              const isLocked = !canUseStrength(opt.key);
               return (
                 <TouchableOpacity
                   key={opt.key}
@@ -290,14 +297,21 @@ export default function SettingsScreen() {
           <LegalRow
             icon="refresh-outline"
             label="Restore Purchases"
-            onPress={() => {
+            onPress={async () => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              Alert.alert(
-                'Restore Purchases',
-                'Looking for previous subscriptions...',
-                [{ text: 'OK' }]
-              );
-              // TODO: Implement StoreKit restore
+              try {
+                await useSubscriptionStore.getState().restore();
+                const sub = useSubscriptionStore.getState().subscription;
+                Alert.alert(
+                  'Purchases Restored',
+                  sub.tier === 'free'
+                    ? 'No previous subscriptions found.'
+                    : `Your ${sub.tier === 'proplus' ? 'Pro+' : 'Pro'} subscription has been restored.`,
+                  [{ text: 'OK' }]
+                );
+              } catch (err: any) {
+                Alert.alert('Error', err.message || 'Failed to restore purchases.');
+              }
             }}
           />
           <View style={styles.divider} />

@@ -30,15 +30,32 @@ export async function apiRequest<T = unknown>(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_URL}${endpoint}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${endpoint}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (fetchError) {
+    throw new Error(
+      `Network error: Cannot reach ${API_URL}. Is the backend running and ngrok URL correct?`
+    );
+  }
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-    throw new Error(error.detail ?? `Request failed: ${response.status}`);
+    let detail = `HTTP ${response.status}`;
+    try {
+      const errorBody = await response.json();
+      detail = errorBody.detail || JSON.stringify(errorBody);
+    } catch {
+      try {
+        detail = await response.text();
+      } catch {
+        // keep the status code
+      }
+    }
+    throw new Error(detail);
   }
 
   return response.json() as Promise<T>;

@@ -13,7 +13,7 @@ export default function TabsLayout() {
         tabBarActiveTintColor: colors.white,
         tabBarInactiveTintColor: colors.muted,
         tabBarLabelStyle: styles.tabLabel,
-        animation: 'fade',
+        lazy: false,
       }}
     >
       <Tabs.Screen

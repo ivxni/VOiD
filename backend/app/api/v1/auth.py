@@ -45,12 +45,14 @@ async def apple_sign_in(
     user = result.scalar_one_or_none()
 
     if user is None:
-        # New user — create account
+        # New user — create account (starts on free tier)
         user = User(
             apple_subject_id=apple_subject_id,
             email=body.email or apple_claims.get("email"),
             is_premium=False,
+            subscription_tier="free",
             subscription_status="none",
+            billing_cycle=None,
         )
         db.add(user)
         await db.commit()

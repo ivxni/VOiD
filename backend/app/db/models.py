@@ -13,8 +13,8 @@ from sqlalchemy import (
     String,
     Boolean,
     DateTime,
+    Integer,
     ForeignKey,
-    Text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -38,13 +38,24 @@ class User(Base):
     apple_subject_id = Column(String(255), unique=True, nullable=False, index=True)
     email = Column(String(255), nullable=True)
 
-    # Subscription
-    is_premium = Column(Boolean, default=False, nullable=False)
-    subscription_status = Column(
-        String(50), default="none", nullable=False
-    )  # 'active', 'expired', 'trial', 'lifetime', 'none'
+    # ── Subscription ──────────────────────────────────────────────────────
+    # Tier: 'free', 'pro', 'proplus'
+    subscription_tier = Column(String(20), default="free", nullable=False)
+    # Billing cycle: 'monthly', 'yearly', None (for free)
+    billing_cycle = Column(String(20), nullable=True)
+    # Status: 'active', 'expired', 'trial', 'cancelled', 'none'
+    subscription_status = Column(String(50), default="none", nullable=False)
+    # Apple original_transaction_id for receipt validation
+    apple_transaction_id = Column(String(255), nullable=True)
+    # When the current subscription period started
+    subscription_started_at = Column(DateTime(timezone=True), nullable=True)
+    # When the current subscription period expires
+    subscription_expires_at = Column(DateTime(timezone=True), nullable=True)
 
-    # Timestamps
+    # Derived convenience field
+    is_premium = Column(Boolean, default=False, nullable=False)
+
+    # ── Timestamps ────────────────────────────────────────────────────────
     created_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -52,11 +63,26 @@ class User(Base):
     )
     last_login = Column(DateTime(timezone=True), nullable=True)
 
-    # Relationships
+    # ── Relationships ─────────────────────────────────────────────────────
     usage_logs = relationship("UsageLog", back_populates="user", lazy="dynamic")
 
+    @property
+    def effective_tier(self) -> str:
+        """Return the effective tier based on subscription status."""
+        if self.subscription_status in ("active", "trial"):
+            return self.subscription_tier or "free"
+        return "free"
+
+    @property
+    def is_active_subscriber(self) -> bool:
+        """True if user has an active paid subscription."""
+        return (
+            self.subscription_status in ("active", "trial")
+            and self.subscription_tier in ("pro", "proplus")
+        )
+
     def __repr__(self) -> str:
-        return f"<User {self.id} premium={self.is_premium}>"
+        return f"<User {self.id} tier={self.subscription_tier} status={self.subscription_status}>"
 
 
 class UsageLog(Base):

@@ -1,11 +1,13 @@
 /**
  * VOiD — Cloaked Images Store
  *
- * Persists cloaked image history for the Gallery tab
- * and Recent Activity on the Home screen.
+ * Persists cloaked image history to AsyncStorage for the
+ * Gallery tab and Recent Activity on the Home screen.
  */
 
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface CloakedImage {
   id: string;
@@ -20,6 +22,8 @@ export interface CloakedImage {
   width: number;
   height: number;
   savedToGallery: boolean;
+  /** 0-1 cosine distance from SFace embedding (higher = more disruption) */
+  avgEmbeddingDistance?: number;
 }
 
 interface CloakStoreState {
@@ -34,44 +38,58 @@ interface CloakStoreState {
   getAverageTime: () => number;
 }
 
-export const useCloakStore = create<CloakStoreState>((set, get) => ({
-  images: [],
-  totalCloaked: 0,
-  totalSaved: 0,
+export const useCloakStore = create<CloakStoreState>()(
+  persist(
+    (set, get) => ({
+      images: [],
+      totalCloaked: 0,
+      totalSaved: 0,
 
-  addImage: (image) =>
-    set((state) => ({
-      images: [
-        {
-          ...image,
-          id: `cloak_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-          timestamp: Date.now(),
-          savedToGallery: false,
-        },
-        ...state.images,
-      ],
-      totalCloaked: state.totalCloaked + 1,
-    })),
+      addImage: (image) =>
+        set((state) => ({
+          images: [
+            {
+              ...image,
+              id: `cloak_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+              timestamp: Date.now(),
+              savedToGallery: false,
+            },
+            ...state.images,
+          ],
+          totalCloaked: state.totalCloaked + 1,
+        })),
 
-  markSaved: (id) =>
-    set((state) => ({
-      images: state.images.map((img) =>
-        img.id === id ? { ...img, savedToGallery: true } : img
-      ),
-      totalSaved: state.totalSaved + 1,
-    })),
+      markSaved: (id) =>
+        set((state) => ({
+          images: state.images.map((img) =>
+            img.id === id ? { ...img, savedToGallery: true } : img
+          ),
+          totalSaved: state.totalSaved + 1,
+        })),
 
-  removeImage: (id) =>
-    set((state) => ({
-      images: state.images.filter((img) => img.id !== id),
-    })),
+      removeImage: (id) =>
+        set((state) => ({
+          images: state.images.filter((img) => img.id !== id),
+        })),
 
-  getRecentImages: (count) => get().images.slice(0, count),
+      getRecentImages: (count) => get().images.slice(0, count),
 
-  getAverageTime: () => {
-    const imgs = get().images;
-    if (imgs.length === 0) return 0;
-    const total = imgs.reduce((sum, img) => sum + img.processingTimeMs, 0);
-    return Math.round(total / imgs.length);
-  },
-}));
+      getAverageTime: () => {
+        const imgs = get().images;
+        if (imgs.length === 0) return 0;
+        const total = imgs.reduce((sum, img) => sum + img.processingTimeMs, 0);
+        return Math.round(total / imgs.length);
+      },
+    }),
+    {
+      name: 'void-cloak-history',
+      storage: createJSONStorage(() => AsyncStorage),
+      // Only persist data fields, not functions
+      partialize: (state) => ({
+        images: state.images,
+        totalCloaked: state.totalCloaked,
+        totalSaved: state.totalSaved,
+      }),
+    },
+  ),
+);

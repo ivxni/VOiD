@@ -43,6 +43,9 @@ export interface CloakApiResult {
   processingTimeMs: number;
   width: number;
   height: number;
+  modelGuided: boolean;                // SFace model-guided perturbation used
+  avgEmbeddingDistance: number;         // 0-1, higher = more effective
+  embeddingDistances: number[];         // per-face distances
 }
 
 /**
@@ -147,6 +150,9 @@ export async function cloakImageRemote(
       processingTimeMs: result.processing_time_ms,
       width: result.width,
       height: result.height,
+      modelGuided: result.model_guided ?? false,
+      avgEmbeddingDistance: result.avg_embedding_distance ?? 0,
+      embeddingDistances: result.embedding_distances ?? [],
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';

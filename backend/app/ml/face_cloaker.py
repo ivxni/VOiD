@@ -1,21 +1,34 @@
 """
-VOiD Backend — Adversarial Face Cloaking Engine
+VOiD Backend — Model-Guided Adversarial Face Cloaking Engine
 
 Pipeline:
   1. Fix EXIF orientation (critical for phone photos)
-  2. Detect faces via OpenCV Haar Cascades (multi-rotation, profile)
-  3. Generate adversarial perturbation targeting the embedding space
-  4. Apply perturbation ONLY to face region with smooth blending
-  5. Generate AI-analysis visualization (edge detection + heatmap)
+  2. Detect faces via OpenCV DNN SSD detector (fallback: Haar cascades)
+  3. Extract face embeddings via SFace recognition model (OpenCV)
+  4. Generate adversarial perturbation using constrained SPSA:
+     - Smooth random probe directions (not Bernoulli ±1)
+     - Gradient transformed for imperceptibility:
+       · Gaussian smooth (σ=4.0) → broad spatial patterns
+       · Edge-adaptive masking (floor=0.20) → minimal noise on skin
+       · Luminance suppression (55%) → colour shifts preferred
+     - Final full-resolution smooth after upscale
+     → Perturbation is nearly invisible yet disrupts FR models
+  5. Apply perturbation with smooth feathered blending
+  6. Generate AI-analysis visualization with embedding distance metrics
 
 Strength mapping:
-  subtle   → eps=4/255,  steps=5   (fast, light perturbation)
-  standard → eps=8/255,  steps=10  (balanced)
-  maximum  → eps=16/255, steps=20  (strongest, slower)
+  subtle   → eps=6/255,  steps=40,  samples=4  (~320 evals)
+  standard → eps=12/255, steps=60,  samples=6  (~720 evals)
+  maximum  → eps=24/255, steps=100, samples=8  (~1600 evals)
+
+Fallback: If SFace model is unavailable, uses untargeted smooth noise.
 """
 
 import io
+import os
+import time
 import logging
+import urllib.request
 from typing import Literal
 
 import cv2
@@ -24,19 +37,194 @@ from PIL import Image, ImageOps
 
 logger = logging.getLogger("void.ml")
 
-# Strength presets: (epsilon, pgd_steps, step_size_factor)
+# ─── Strength Presets ─────────────────────────────────────────────────────────
+# (epsilon, spsa_steps, spsa_samples_per_step)
+# Higher epsilon is safe because gradient-smoothing (σ=4.0) converts
+# pixel changes into broad colour gradients that are visually invisible
+# even at larger magnitudes.
 STRENGTH_PRESETS = {
-    "subtle":   (4.0 / 255.0,  5,  1.5),
-    "standard": (8.0 / 255.0,  10, 1.0),
-    "maximum":  (16.0 / 255.0, 20, 0.8),
+    "subtle":   (6.0 / 255.0,   40, 4),
+    "standard": (12.0 / 255.0,  60, 6),
+    "maximum":  (24.0 / 255.0, 100, 8),
 }
 
 CloakStrength = Literal["subtle", "standard", "maximum"]
 
-# Global detector holders (lazy loaded)
+# ─── Model Paths & URLs ──────────────────────────────────────────────────────
+
+MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
+
+# DNN SSD Face Detector
+PROTOTXT_URL = (
+    "https://raw.githubusercontent.com/opencv/opencv/master/"
+    "samples/dnn/face_detector/deploy.prototxt"
+)
+CAFFEMODEL_URL = (
+    "https://raw.githubusercontent.com/opencv/opencv_3rdparty/"
+    "dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel"
+)
+
+# SFace Recognition Model (~37 MB ONNX)
+SFACE_URLS = [
+    "https://github.com/opencv/opencv_zoo/raw/main/models/"
+    "face_recognition_sface/face_recognition_sface_2021dec.onnx",
+]
+SFACE_FILENAME = "face_recognition_sface_2021dec.onnx"
+SFACE_INPUT_SIZE = 112  # Model expects 112x112
+# ─── Imperceptibility — Gradient Transformation Parameters ────────────────────
+# Applied to the SPSA gradient BEFORE each update step to steer the
+# optimisation toward perturbations that are effective AND invisible.
+#
+# Key: sigma=4.0 at 112px ≈ 3.5% of face width → very broad colour gradients
+# instead of pixel-level noise.  EDGE_FLOOR near zero means smooth skin gets
+# almost no perturbation; all signal is pushed into hair / eyebrows / eyes.
+GRAD_SMOOTH_SIGMA = 4.0     # Strong gradient smooth → broad spatial patterns
+LUMINANCE_SUPPRESS = 0.55   # Remove 55% of brightness noise → colour shifts
+EDGE_FLOOR = 0.20           # Allow some signal on smooth skin for FR disruption
+DELTA_SMOOTH_SIGMA = 3.5    # Smooth SPSA probe vectors (kills HF gradient est.)
+FINAL_SMOOTH_RATIO = 80.0   # Full-res sigma = max(2.0, width / this)
+_LUM_R, _LUM_G, _LUM_B = 0.299, 0.587, 0.114
+
+# ─── Singleton Model Instances ────────────────────────────────────────────────
+
+_dnn_net = None
+_dnn_available = None
+
+_recognizer = None
+_recognizer_available = None
+
 _cascade_default = None
 _cascade_alt = None
 _cascade_profile = None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  SECTION 1 — DNN Face Detector
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def _ensure_dnn_model():
+    """Download DNN face detector model files if not present."""
+    global _dnn_net, _dnn_available
+
+    if _dnn_available is not None:
+        return _dnn_available
+
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    prototxt_path = os.path.join(MODEL_DIR, "deploy.prototxt")
+    caffemodel_path = os.path.join(
+        MODEL_DIR, "res10_300x300_ssd_iter_140000.caffemodel"
+    )
+
+    try:
+        if not os.path.exists(prototxt_path):
+            logger.info("Downloading DNN face detector prototxt...")
+            urllib.request.urlretrieve(PROTOTXT_URL, prototxt_path)
+
+        if not os.path.exists(caffemodel_path):
+            logger.info("Downloading DNN face detector caffemodel (10MB)...")
+            urllib.request.urlretrieve(CAFFEMODEL_URL, caffemodel_path)
+
+        _dnn_net = cv2.dnn.readNetFromCaffe(prototxt_path, caffemodel_path)
+        _dnn_available = True
+        logger.info("DNN face detector loaded successfully")
+    except Exception as e:
+        logger.warning(
+            f"DNN face detector not available, falling back to Haar: {e}"
+        )
+        _dnn_available = False
+
+    return _dnn_available
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  SECTION 2 — SFace Recognition Model
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def _ensure_recognizer():
+    """Download and load SFace recognition model for embedding extraction."""
+    global _recognizer, _recognizer_available
+
+    if _recognizer_available is not None:
+        return _recognizer_available
+
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    model_path = os.path.join(MODEL_DIR, SFACE_FILENAME)
+
+    try:
+        if not os.path.exists(model_path):
+            logger.info("Downloading SFace recognition model (~37 MB)...")
+            downloaded = False
+            for url in SFACE_URLS:
+                try:
+                    urllib.request.urlretrieve(url, model_path)
+                    fsize = os.path.getsize(model_path)
+                    if fsize < 1_000_000:  # Git LFS pointer — not the real file
+                        logger.warning(
+                            f"Download from {url} too small "
+                            f"({fsize} bytes), trying next URL..."
+                        )
+                        os.remove(model_path)
+                        continue
+                    downloaded = True
+                    logger.info(
+                        f"SFace model downloaded: "
+                        f"{fsize / 1024 / 1024:.1f} MB"
+                    )
+                    break
+                except Exception as dl_err:
+                    logger.warning(f"Download failed from {url}: {dl_err}")
+                    if os.path.exists(model_path):
+                        os.remove(model_path)
+
+            if not downloaded:
+                raise RuntimeError(
+                    "Could not download SFace model from any source"
+                )
+
+        _recognizer = cv2.FaceRecognizerSF.create(model_path, "")
+        _recognizer_available = True
+        logger.info("SFace face recognizer loaded — model-guided cloaking active")
+    except Exception as e:
+        logger.warning(f"SFace recognizer not available: {e}")
+        logger.warning("Using untargeted perturbation (less effective)")
+        _recognizer_available = False
+
+    return _recognizer_available
+
+
+def _get_embedding(face_bgr_112: np.ndarray) -> np.ndarray | None:
+    """
+    Extract 128-d face embedding from a 112x112 BGR uint8 image.
+    Returns flattened (128,) float32 array, or None on failure.
+    """
+    if _recognizer is None:
+        return None
+    try:
+        emb = _recognizer.feature(face_bgr_112)  # shape (1, 128)
+        return emb.flatten().astype(np.float64)
+    except Exception as e:
+        logger.debug(f"Embedding extraction failed: {e}")
+        return None
+
+
+def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    """Cosine similarity ∈ [-1, 1]."""
+    na, nb = np.linalg.norm(a), np.linalg.norm(b)
+    if na < 1e-8 or nb < 1e-8:
+        return 0.0
+    return float(np.dot(a, b) / (na * nb))
+
+
+def _cosine_distance(a: np.ndarray, b: np.ndarray) -> float:
+    """Cosine distance = 1 − similarity.  Higher = more different."""
+    return 1.0 - _cosine_similarity(a, b)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  SECTION 3 — Haar Cascade Fallback
+# ══════════════════════════════════════════════════════════════════════════════
 
 
 def _get_cascades():
@@ -52,77 +240,112 @@ def _get_cascades():
         _cascade_profile = cv2.CascadeClassifier(
             cv2.data.haarcascades + "haarcascade_profileface.xml"
         )
-        logger.info("Loaded 3 Haar Cascade face detectors")
+        logger.info("Loaded 3 Haar Cascade face detectors (fallback)")
     return _cascade_default, _cascade_alt, _cascade_profile
 
 
-# ─── Face Detection ───────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+#  SECTION 4 — Face Detection
+# ══════════════════════════════════════════════════════════════════════════════
 
 
-def _detect_faces_single_orientation(gray: np.ndarray) -> list[tuple]:
+def _detect_faces_dnn(
+    img_bgr: np.ndarray, confidence_threshold: float = 0.5
+) -> list[dict]:
     """
-    Run all cascade classifiers on a single grayscale image.
-    Returns list of (x, y, w, h) tuples.
+    Detect faces using OpenCV DNN SSD detector.
+    Robust to angles, lighting, partial occlusion.
     """
+    global _dnn_net
+    h, w = img_bgr.shape[:2]
+
+    blob = cv2.dnn.blobFromImage(
+        img_bgr, 1.0, (300, 300),
+        (104.0, 177.0, 123.0), swapRB=False, crop=False,
+    )
+    _dnn_net.setInput(blob)
+    detections = _dnn_net.forward()
+
+    faces = []
+    for i in range(detections.shape[2]):
+        confidence = detections[0, 0, i, 2]
+        if confidence < confidence_threshold:
+            continue
+
+        box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
+        x1, y1, x2, y2 = box.astype(int)
+
+        # 25% padding each side
+        bw, bh = x2 - x1, y2 - y1
+        pad_x, pad_y = int(bw * 0.25), int(bh * 0.25)
+        x1 = max(0, x1 - pad_x)
+        y1 = max(0, y1 - pad_y)
+        x2 = min(w, x2 + pad_x)
+        y2 = min(h, y2 + pad_y)
+
+        faces.append({
+            "bbox": np.array([x1, y1, x2, y2]),
+            "confidence": float(confidence),
+        })
+
+    logger.info(
+        f"DNN detected {len(faces)} face(s) in {w}x{h} image "
+        f"(threshold={confidence_threshold})"
+    )
+    return faces
+
+
+def _detect_faces_haar(img_bgr: np.ndarray) -> list[dict]:
+    """Haar cascade fallback — runs ALL cascades and combines via NMS."""
     cascade_default, cascade_alt, cascade_profile = _get_cascades()
+    h, w = img_bgr.shape[:2]
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     eq = cv2.equalizeHist(gray)
 
-    # 1) Default frontal — balanced
-    rects = cascade_default.detectMultiScale(
-        eq, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30)
-    )
-    if len(rects) > 0:
-        return rects.tolist()
+    all_rects = []
+    for cascade, params in [
+        (cascade_default, {"scaleFactor": 1.1,  "minNeighbors": 4, "minSize": (30, 30)}),
+        (cascade_default, {"scaleFactor": 1.05, "minNeighbors": 3, "minSize": (20, 20)}),
+        (cascade_alt,     {"scaleFactor": 1.05, "minNeighbors": 3, "minSize": (20, 20)}),
+        (cascade_alt,     {"scaleFactor": 1.03, "minNeighbors": 2, "minSize": (15, 15)}),
+        (cascade_profile, {"scaleFactor": 1.1,  "minNeighbors": 3, "minSize": (30, 30)}),
+    ]:
+        rects = cascade.detectMultiScale(eq, **params)
+        if len(rects) > 0:
+            all_rects.extend(rects.tolist())
 
-    # 2) Alt frontal — more sensitive
-    rects = cascade_alt.detectMultiScale(
-        eq, scaleFactor=1.05, minNeighbors=3, minSize=(20, 20)
-    )
-    if len(rects) > 0:
-        return rects.tolist()
-
-    # 3) Profile face (left-looking)
-    rects = cascade_profile.detectMultiScale(
-        eq, scaleFactor=1.1, minNeighbors=3, minSize=(30, 30)
-    )
-    if len(rects) > 0:
-        return rects.tolist()
-
-    # 4) Profile face — flipped (right-looking)
+    # Flipped for right-looking profiles
     flipped = cv2.flip(eq, 1)
     rects = cascade_profile.detectMultiScale(
-        flipped, scaleFactor=1.1, minNeighbors=3, minSize=(30, 30)
+        flipped, scaleFactor=1.1, minNeighbors=3, minSize=(30, 30),
     )
     if len(rects) > 0:
-        w = gray.shape[1]
-        return [(w - x - fw, y, fw, fh) for (x, y, fw, fh) in rects.tolist()]
+        all_rects.extend(
+            [(w - x - fw, y, fw, fh) for (x, y, fw, fh) in rects.tolist()]
+        )
 
-    # 5) Last resort — very loose params on alt cascade
-    rects = cascade_alt.detectMultiScale(
-        eq, scaleFactor=1.03, minNeighbors=2, minSize=(15, 15)
-    )
-    if len(rects) > 0:
-        return rects.tolist()
+    if not all_rects:
+        return []
 
-    return []
+    faces = []
+    for rx, ry, rw, rh in all_rects:
+        pad_x, pad_y = int(rw * 0.25), int(rh * 0.25)
+        faces.append({
+            "bbox": np.array([
+                max(0, rx - pad_x),
+                max(0, ry - pad_y),
+                min(w, rx + rw + pad_x),
+                min(h, ry + rh + pad_y),
+            ])
+        })
 
-
-def _rotate_bbox_back(rx, ry, rw, rh, angle, orig_h, orig_w):
-    """Map a bbox detected in a rotated image back to original coords."""
-    if angle == 0:
-        return (rx, ry, rw, rh)
-    elif angle == 90:
-        # cv2.ROTATE_90_CLOCKWISE: (x,y) in rotated → (y, orig_w - x - rw)
-        return (ry, orig_w - rx - rw, rh, rw)
-    elif angle == 180:
-        return (orig_w - rx - rw, orig_h - ry - rh, rw, rh)
-    elif angle == 270:
-        return (orig_h - ry - rh, rx, rh, rw)
-    return (rx, ry, rw, rh)
+    faces = _nms(faces, iou_threshold=0.35)
+    logger.info(f"Haar detected {len(faces)} face(s) in {w}x{h} image (after NMS)")
+    return faces
 
 
 def _compute_iou(box1: np.ndarray, box2: np.ndarray) -> float:
-    """Compute Intersection-over-Union between two [x1,y1,x2,y2] boxes."""
+    """IoU between two [x1,y1,x2,y2] boxes."""
     x1 = max(box1[0], box2[0])
     y1 = max(box1[1], box2[1])
     x2 = min(box1[2], box2[2])
@@ -135,107 +358,283 @@ def _compute_iou(box1: np.ndarray, box2: np.ndarray) -> float:
 
 
 def _nms(faces: list[dict], iou_threshold: float = 0.35) -> list[dict]:
-    """Non-Maximum Suppression — remove duplicate / overlapping detections."""
+    """Non-Maximum Suppression."""
     if len(faces) <= 1:
         return faces
-    # Sort by area descending (keep larger boxes first)
     faces = sorted(
         faces,
-        key=lambda f: (f["bbox"][2] - f["bbox"][0]) * (f["bbox"][3] - f["bbox"][1]),
+        key=lambda f: (
+            (f["bbox"][2] - f["bbox"][0]) * (f["bbox"][3] - f["bbox"][1])
+        ),
         reverse=True,
     )
     keep: list[dict] = []
     for face in faces:
-        if all(_compute_iou(face["bbox"], k["bbox"]) < iou_threshold for k in keep):
+        if all(
+            _compute_iou(face["bbox"], k["bbox"]) < iou_threshold
+            for k in keep
+        ):
             keep.append(face)
     return keep
 
 
 def _detect_faces(img_bgr: np.ndarray) -> list[dict]:
     """
-    Multi-rotation face detection with NMS de-duplication.
-
-    Tries 0°, 90°, 270°, 180° to catch faces in photos with
-    missing or incorrect EXIF orientation data.
+    Detect faces — DNN first (robust), Haar fallback.
     Returns list of dicts with 'bbox' key: [x1, y1, x2, y2].
     """
-    h, w = img_bgr.shape[:2]
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    if _ensure_dnn_model():
+        faces = _detect_faces_dnn(img_bgr)
+        if faces:
+            return faces
+        faces = _detect_faces_dnn(img_bgr, confidence_threshold=0.3)
+        if faces:
+            return faces
+        logger.info("DNN found no faces, trying Haar fallback...")
 
-    rotations = [
-        (0,   gray),
-        (90,  cv2.rotate(gray, cv2.ROTATE_90_CLOCKWISE)),
-        (270, cv2.rotate(gray, cv2.ROTATE_90_COUNTERCLOCKWISE)),
-        (180, cv2.rotate(gray, cv2.ROTATE_180)),
-    ]
+    return _detect_faces_haar(img_bgr)
 
-    for angle, rotated_gray in rotations:
-        rects = _detect_faces_single_orientation(rotated_gray)
-        if not rects:
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  SECTION 5 — Perturbation Generation
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def _face_to_bgr_112(face_rgb_float: np.ndarray) -> np.ndarray:
+    """Convert [0..1] RGB float face crop -> 112x112 BGR uint8 for SFace."""
+    bgr = cv2.cvtColor(
+        (np.clip(face_rgb_float, 0, 1) * 255).astype(np.uint8),
+        cv2.COLOR_RGB2BGR,
+    )
+    return cv2.resize(
+        bgr, (SFACE_INPUT_SIZE, SFACE_INPUT_SIZE),
+        interpolation=cv2.INTER_AREA,
+    )
+
+
+def _model_guided_perturbation(
+    face_rgb_float: np.ndarray,
+    epsilon: float,
+    steps: int,
+    n_spsa_samples: int,
+) -> tuple[np.ndarray, float]:
+    """
+    Adversarial perturbation using SPSA with smooth-projection
+    targeting SFace embedding space.
+
+    Key insight for IMPERCEPTIBILITY:
+      After each optimisation step, the perturbation is Gaussian-
+      blurred (sigma=5 at 112x112) to remove high-frequency pixel
+      noise.  This produces broad, smooth colour shifts that are
+      nearly invisible on skin while still disrupting FR embeddings.
+
+    Algorithm per step
+    ------------------
+    1. Draw Bernoulli ±1 direction at 112x112
+    2. Two-sided SPSA gradient estimate
+    3. FGSM sign-update
+    4. *Smooth projection*: Gaussian blur entire perturbation
+    5. Re-normalise to fill epsilon-ball, clip
+
+    Returns (perturbation_at_original_size, final_cosine_distance)
+    """
+    h, w, c = face_rgb_float.shape
+    S = SFACE_INPUT_SIZE  # 112
+
+    # ── Original embedding ──
+    orig_112 = _face_to_bgr_112(face_rgb_float)
+    orig_emb = _get_embedding(orig_112)
+    if orig_emb is None:
+        logger.warning("No embedding — falling back to untargeted")
+        return _untargeted_perturbation(face_rgb_float, epsilon, steps), 0.0
+
+    # ── Face at model resolution ──
+    face_112 = cv2.resize(
+        face_rgb_float, (S, S), interpolation=cv2.INTER_AREA,
+    ).astype(np.float64)
+
+    pert = np.zeros((S, S, c), dtype=np.float64)
+
+    # SPSA hyper-parameters — slightly higher LR to compensate
+    # for gradient transformations reducing effective magnitude
+    probe_c = max(4.0 / 255.0, epsilon * 0.30)
+    step_lr = epsilon * 2.0 / np.sqrt(max(steps, 1))
+
+    # ── Pre-compute edge-adaptive weight map ──
+    # Concentrate perturbation in textured areas (hair, eyebrows, eyes)
+    # where noise is invisible; almost zero on smooth skin.
+    face_gray = cv2.cvtColor(
+        (face_112 * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY,
+    )
+    sx = cv2.Sobel(face_gray, cv2.CV_64F, 1, 0, ksize=3)
+    sy = cv2.Sobel(face_gray, cv2.CV_64F, 0, 1, ksize=3)
+    edges = np.sqrt(sx ** 2 + sy ** 2)
+    emx = edges.max()
+    if emx > 0:
+        edges /= emx
+    edges = cv2.GaussianBlur(edges, (0, 0), sigmaX=5.0)
+    emx2 = edges.max()
+    if emx2 > 0:
+        edges /= emx2
+    edge_w = EDGE_FLOOR + (1.0 - EDGE_FLOOR) * edges  # [0.08 .. 1.0]
+
+    best_dist = 0.0
+
+    for k in range(steps):
+        grad_acc = np.zeros((S, S, c), dtype=np.float64)
+        n_valid = 0
+
+        for _ in range(n_spsa_samples):
+            # ── Smooth probe directions ──
+            # Instead of raw Bernoulli ±1 (maximally HF), generate smooth
+            # random directions.  This biases the gradient estimate toward
+            # low-frequency components → perturbation is inherently smooth.
+            raw_delta = np.random.randn(S, S, c)
+            for ch in range(c):
+                raw_delta[:, :, ch] = cv2.GaussianBlur(
+                    raw_delta[:, :, ch], (0, 0),
+                    sigmaX=DELTA_SMOOTH_SIGMA,
+                )
+            delta = np.sign(raw_delta)
+
+            plus_img = np.clip(
+                face_112 + pert + probe_c * delta, 0.0, 1.0,
+            )
+            minus_img = np.clip(
+                face_112 + pert - probe_c * delta, 0.0, 1.0,
+            )
+
+            plus_bgr = cv2.cvtColor(
+                (plus_img * 255).astype(np.uint8), cv2.COLOR_RGB2BGR,
+            )
+            minus_bgr = cv2.cvtColor(
+                (minus_img * 255).astype(np.uint8), cv2.COLOR_RGB2BGR,
+            )
+
+            emb_p = _get_embedding(plus_bgr)
+            emb_m = _get_embedding(minus_bgr)
+            if emb_p is None or emb_m is None:
+                continue
+
+            sim_p = _cosine_similarity(orig_emb, emb_p)
+            sim_m = _cosine_similarity(orig_emb, emb_m)
+
+            grad_acc += (sim_p - sim_m) * delta / (2.0 * probe_c)
+            n_valid += 1
+
+        if n_valid == 0:
             continue
 
-        faces = []
-        for (rx, ry, rw, rh) in rects:
-            ox, oy, ow, oh = _rotate_bbox_back(rx, ry, rw, rh, angle, h, w)
-            pad_x = int(ow * 0.25)
-            pad_y = int(oh * 0.25)
-            x1 = max(0, ox - pad_x)
-            y1 = max(0, oy - pad_y)
-            x2 = min(w, ox + ow + pad_x)
-            y2 = min(h, oy + oh + pad_y)
-            faces.append({"bbox": np.array([x1, y1, x2, y2])})
+        gradient = grad_acc / n_valid
 
-        # Remove duplicates
-        faces = _nms(faces)
+        # ── GRADIENT TRANSFORMATION (imperceptibility constraints) ──
+        # Transform the gradient BEFORE each step so the optimiser
+        # naturally finds perturbations that are both effective AND
+        # visually imperceptible.
 
-        logger.info(
-            f"Detected {len(faces)} face(s) at {angle}° in {w}x{h} image "
-            f"(after NMS)"
+        # 1. Strong smooth — broad colour gradients instead of pixel noise
+        for ch in range(c):
+            gradient[:, :, ch] = cv2.GaussianBlur(
+                gradient[:, :, ch], (0, 0), sigmaX=GRAD_SMOOTH_SIGMA,
+            )
+
+        # 2. Edge-adaptive weighting — push changes into textured areas
+        #    (hair, eyebrows, eyes); almost zero on smooth skin
+        for ch in range(c):
+            gradient[:, :, ch] *= edge_w
+
+        # 3. Luminance suppression — prefer colour shifts over brightness
+        lum_g = (
+            _LUM_R * gradient[:, :, 0]
+            + _LUM_G * gradient[:, :, 1]
+            + _LUM_B * gradient[:, :, 2]
         )
-        return faces
+        for ch in range(c):
+            gradient[:, :, ch] -= LUMINANCE_SUPPRESS * lum_g
 
-    logger.info(f"No faces detected in {w}x{h} image after 4 rotations")
-    return []
+        # FGSM sign update with transformed gradient
+        pert -= step_lr * np.sign(gradient)
+        pert = np.clip(pert, -epsilon, epsilon)
+
+        # ── Progress log ──
+        if (k + 1) % max(1, steps // 4) == 0:
+            chk = np.clip(face_112 + pert, 0.0, 1.0)
+            chk_bgr = cv2.cvtColor(
+                (chk * 255).astype(np.uint8), cv2.COLOR_RGB2BGR,
+            )
+            chk_emb = _get_embedding(chk_bgr)
+            if chk_emb is not None:
+                d = _cosine_distance(orig_emb, chk_emb)
+                best_dist = max(best_dist, d)
+                logger.info(
+                    f"  SPSA step {k+1}/{steps}: "
+                    f"dist={d:.4f} (best={best_dist:.4f})"
+                )
+
+    # ── Final measurement ──
+    final = np.clip(face_112 + pert, 0.0, 1.0)
+    final_bgr = cv2.cvtColor(
+        (final * 255).astype(np.uint8), cv2.COLOR_RGB2BGR,
+    )
+    final_emb = _get_embedding(final_bgr)
+    if final_emb is not None:
+        best_dist = _cosine_distance(orig_emb, final_emb)
+
+    # ── Upscale to original crop (bilinear = smooth) ──
+    if (h, w) != (S, S):
+        pert_full = cv2.resize(
+            pert, (w, h), interpolation=cv2.INTER_LINEAR,
+        )
+    else:
+        pert_full = pert.copy()
+
+    # ── Final full-resolution smooth ──
+    # Clean up any remaining high-frequency artifacts from upscaling.
+    final_sigma = max(2.0, w / FINAL_SMOOTH_RATIO)
+    for ch in range(c):
+        pert_full[:, :, ch] = cv2.GaussianBlur(
+            pert_full[:, :, ch], (0, 0), sigmaX=final_sigma,
+        )
+    pert_full = np.clip(pert_full, -epsilon, epsilon)
+
+    logger.info(
+        f"SPSA done — dist={best_dist:.4f} "
+        f"({steps}x{n_spsa_samples} = "
+        f"{steps * n_spsa_samples * 2} evals), "
+        f"final_smooth_sigma={final_sigma:.1f}"
+    )
+    return pert_full, best_dist
 
 
-# ─── Perturbation Generation ─────────────────────────────────────────────────
-
-
-def _generate_adversarial_perturbation(
+def _untargeted_perturbation(
     face_region: np.ndarray,
     epsilon: float,
     steps: int,
-    step_size_factor: float,
 ) -> np.ndarray:
     """
-    PGD-style adversarial perturbation in frequency domain.
-
-    Creates structured noise targeting spatial frequencies that
-    facial recognition feature extractors are most sensitive to.
+    Fallback: untargeted structured noise when no recognition model
+    is available.  Applies smooth Gaussian noise patterns.
     """
     h, w, c = face_region.shape
-    step_size = epsilon * step_size_factor / steps
-
-    perturbation = np.zeros_like(face_region, dtype=np.float64)
-
+    step_size = epsilon * 1.2 / max(steps, 1)
+    pert = np.zeros_like(face_region, dtype=np.float64)
     for _ in range(steps):
         noise = np.random.randn(h, w, c).astype(np.float64)
-        sigma = max(1.0, min(h, w) / 32.0)
+        sigma = max(1.5, min(h, w) / 20.0)
         for ch in range(c):
             noise[:, :, ch] = cv2.GaussianBlur(
-                noise[:, :, ch], (0, 0), sigmaX=sigma
+                noise[:, :, ch], (0, 0), sigmaX=sigma,
             )
         norm = np.linalg.norm(noise)
-        if norm > 0:
+        if norm > 1e-8:
             noise /= norm
-        perturbation += step_size * noise
-        perturbation = np.clip(perturbation, -epsilon, epsilon)
-
-    return perturbation
+        pert += step_size * noise
+        pert = np.clip(pert, -epsilon, epsilon)
+    return pert
 
 
 def _create_smooth_mask(
-    bbox: np.ndarray, img_shape: tuple, feather_px: int = 20
+    bbox: np.ndarray, img_shape: tuple, feather_px: int = 20,
 ) -> np.ndarray:
     """Feathered mask for seamless perturbation blending."""
     h, w = img_shape[:2]
@@ -249,114 +648,127 @@ def _create_smooth_mask(
     return mask
 
 
-# ─── AI Analysis Visualization ────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+#  SECTION 6 — AI Analysis Visualisation
+# ══════════════════════════════════════════════════════════════════════════════
 
 
 def generate_analysis(
     original_np: np.ndarray,
     cloaked_np: np.ndarray,
     faces: list[dict],
+    embedding_distances: list[float] | None = None,
 ) -> bytes:
     """
-    Generate an 'AI view' visualization that shows how the cloaking
-    disrupts facial recognition feature extraction.
-
-    The output is a dark image with:
-      - Sobel edge detection (green/cyan tint — like early CNN layers)
-      - Amplified perturbation heatmap (INFERNO colour-map)
-      - Face region bounding boxes
-      - Overall looks like a sci-fi AI analysis view
-
-    Returns JPEG bytes.
+    'AI view' visualisation showing how cloaking disrupts facial
+    recognition.  Includes per-face embedding distance when available.
     """
     h, w = original_np.shape[:2]
-    orig_u8 = (np.clip(original_np, 0, 1) * 255).astype(np.uint8)
     cloak_u8 = (np.clip(cloaked_np, 0, 1) * 255).astype(np.uint8)
 
-    # ── 1. Compute amplified difference (perturbation visualisation) ──
-    diff = np.abs(cloaked_np.astype(np.float64) - original_np.astype(np.float64))
-    diff_amplified = np.clip(diff * 50.0, 0, 1)  # 50× amplification
-    diff_gray = np.mean(diff_amplified, axis=2)
-    diff_heatmap = cv2.applyColorMap(
-        (diff_gray * 255).astype(np.uint8), cv2.COLORMAP_INFERNO
+    # ── 1. Perturbation heat-map ──
+    diff = np.abs(
+        cloaked_np.astype(np.float64) - original_np.astype(np.float64)
     )
-    diff_heatmap = cv2.cvtColor(diff_heatmap, cv2.COLOR_BGR2RGB)
+    diff_gray = np.mean(np.clip(diff * 50.0, 0, 1), axis=2)
+    diff_heat = cv2.applyColorMap(
+        (diff_gray * 255).astype(np.uint8), cv2.COLORMAP_INFERNO,
+    )
+    diff_heat = cv2.cvtColor(diff_heat, cv2.COLOR_BGR2RGB)
 
-    # ── 2. Edge detection on the CLOAKED image ──
+    # ── 2. Edge detection on cloaked image ──
     cloak_gray = cv2.cvtColor(cloak_u8, cv2.COLOR_RGB2GRAY)
-    sobel_x = cv2.Sobel(cloak_gray, cv2.CV_64F, 1, 0, ksize=3)
-    sobel_y = cv2.Sobel(cloak_gray, cv2.CV_64F, 0, 1, ksize=3)
-    edges = np.sqrt(sobel_x ** 2 + sobel_y ** 2)
-    edge_max = edges.max()
-    if edge_max > 0:
-        edges = (edges / edge_max * 255).astype(np.uint8)
-    else:
-        edges = edges.astype(np.uint8)
+    sx = cv2.Sobel(cloak_gray, cv2.CV_64F, 1, 0, ksize=3)
+    sy = cv2.Sobel(cloak_gray, cv2.CV_64F, 0, 1, ksize=3)
+    edges = np.sqrt(sx ** 2 + sy ** 2)
+    edges = np.clip(edges / edges.max(), 0, 1) if edges.max() > 0 else edges
 
-    # Tint edges green/cyan for sci-fi look
-    edge_rgb = np.zeros((h, w, 3), dtype=np.uint8)
-    edge_rgb[:, :, 0] = (edges * 0.05).astype(np.uint8)   # faint red
-    edge_rgb[:, :, 1] = (edges * 0.8).astype(np.uint8)    # green
-    edge_rgb[:, :, 2] = (edges * 0.35).astype(np.uint8)   # cyan tint
+    # ── 3. Composite ──
+    canvas = np.zeros((h, w, 3), dtype=np.uint8)
+    edge_rgb = np.stack([
+        (edges * 10).astype(np.uint8),
+        (edges * 200).astype(np.uint8),
+        (edges * 130).astype(np.uint8),
+    ], axis=2)
+    canvas = cv2.addWeighted(canvas, 1.0, edge_rgb, 0.7, 0)
+    canvas = cv2.addWeighted(canvas, 1.0, diff_heat, 0.5, 0)
 
-    # ── 3. Composite: dark base + edges + heatmap in face regions ──
-    canvas = edge_rgb.copy()
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = max(0.4, w / 1200)
 
-    for face in faces:
-        x1, y1, x2, y2 = [int(v) for v in face["bbox"]]
-        x1, y1 = max(0, x1), max(0, y1)
-        x2, y2 = min(w, x2), min(h, y2)
-
-        # Feathered mask for this face
-        face_mask = np.zeros((h, w), dtype=np.float64)
-        face_mask[y1:y2, x1:x2] = 1.0
-        ksize = max(3, min(y2 - y1, x2 - x1) // 4) | 1
-        face_mask = cv2.GaussianBlur(face_mask, (ksize, ksize), ksize // 3)
-
-        # Blend heatmap into canvas where face is
-        for ch in range(3):
-            canvas[:, :, ch] = np.clip(
-                canvas[:, :, ch].astype(np.float64)
-                + diff_heatmap[:, :, ch].astype(np.float64) * face_mask * 0.85,
-                0, 255,
-            ).astype(np.uint8)
-
-        # Draw glowing bbox
-        cv2.rectangle(canvas, (x1, y1), (x2, y2), (0, 255, 148), 1)
-        # Glow effect — draw a second slightly larger rect with lower opacity
+    # ── 4. Face boxes + per-face embedding labels ──
+    for i, face in enumerate(faces):
+        x1, y1, x2, y2 = face["bbox"].astype(int)
+        cv2.rectangle(canvas, (x1, y1), (x2, y2), (0, 255, 148), 2)
         cv2.rectangle(
             canvas,
             (max(0, x1 - 2), max(0, y1 - 2)),
             (min(w - 1, x2 + 2), min(h - 1, y2 + 2)),
-            (0, 180, 100),
-            1,
+            (0, 180, 100), 1,
         )
 
-    # ── 4. Add subtle scan-line overlay ──
+        if embedding_distances and i < len(embedding_distances):
+            dist = embedding_distances[i]
+            if dist >= 0.40:
+                color, label = (0, 255, 100), f"DISRUPTED {dist:.0%}"
+            elif dist >= 0.20:
+                color, label = (255, 200, 0), f"PARTIAL {dist:.0%}"
+            elif dist > 0:
+                color, label = (255, 80, 80), f"WEAK {dist:.0%}"
+            else:
+                color, label = (180, 180, 180), "N/A"
+
+            cv2.putText(
+                canvas, label, (x1, max(y1 - 8, 15)),
+                font, scale * 0.65, color, 1, cv2.LINE_AA,
+            )
+
+    # ── 5. Scan lines ──
     for row in range(0, h, 3):
-        canvas[row, :, :] = (canvas[row, :, :].astype(np.float64) * 0.8).astype(
-            np.uint8
-        )
+        canvas[row] = (canvas[row].astype(np.float64) * 0.8).astype(np.uint8)
 
-    # ── 5. Add label ──
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    scale = max(0.4, w / 1200)
+    # ── 6. Header text ──
+    y_txt = int(28 * scale + 10)
     cv2.putText(
-        canvas, "AI FEATURE ANALYSIS", (12, int(28 * scale + 10)),
+        canvas, "AI FEATURE ANALYSIS", (12, y_txt),
         font, scale, (0, 255, 148), 1, cv2.LINE_AA,
     )
-    cv2.putText(
-        canvas, "PERTURBATION DETECTED", (12, int(28 * scale + 10 + 22 * scale)),
-        font, scale * 0.7, (255, 120, 50), 1, cv2.LINE_AA,
-    )
 
-    result_pil = Image.fromarray(canvas, "RGB")
+    avg_dist = 0.0
+    if embedding_distances:
+        valid = [d for d in embedding_distances if d > 0]
+        avg_dist = sum(valid) / len(valid) if valid else 0.0
+
+    if avg_dist >= 0.30:
+        status, s_col = "IDENTITY DISRUPTED", (0, 255, 100)
+    elif avg_dist >= 0.15:
+        status, s_col = "PARTIALLY DISRUPTED", (255, 200, 0)
+    elif avg_dist > 0:
+        status, s_col = "PERTURBATION APPLIED", (255, 120, 50)
+    else:
+        status, s_col = "PERTURBATION DETECTED", (255, 120, 50)
+
+    cv2.putText(
+        canvas, status, (12, int(y_txt + 22 * scale)),
+        font, scale * 0.7, s_col, 1, cv2.LINE_AA,
+    )
+    if avg_dist > 0:
+        cv2.putText(
+            canvas,
+            f"Embedding Shift: {avg_dist:.1%}",
+            (12, int(y_txt + 42 * scale)),
+            font, scale * 0.55, (180, 180, 180), 1, cv2.LINE_AA,
+        )
+
+    out = Image.fromarray(canvas, "RGB")
     buf = io.BytesIO()
-    result_pil.save(buf, format="JPEG", quality=90)
+    out.save(buf, format="JPEG", quality=90)
     return buf.getvalue()
 
 
-# ─── Main Cloaking Pipeline ──────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+#  SECTION 7 — Main Cloaking Pipeline
+# ══════════════════════════════════════════════════════════════════════════════
 
 
 def cloak_image(
@@ -368,12 +780,15 @@ def cloak_image(
     """
     Apply adversarial cloaking to all faces in an image.
 
-    Returns:
-        (cloaked_image_bytes, metadata_dict, analysis_image_bytes_or_None)
+    Returns
+    -------
+    (cloaked_image_bytes, metadata_dict, analysis_image_bytes | None)
     """
+    t0 = time.time()
+
     # ── Decode + fix EXIF orientation ──
     img_pil = Image.open(io.BytesIO(image_bytes))
-    img_pil = ImageOps.exif_transpose(img_pil)  # ← Critical for phone photos
+    img_pil = ImageOps.exif_transpose(img_pil)
 
     if img_pil.mode == "RGBA":
         bg = Image.new("RGB", img_pil.size, (0, 0, 0))
@@ -384,7 +799,12 @@ def cloak_image(
 
     img_np = np.array(img_pil, dtype=np.float64) / 255.0
     img_bgr = cv2.cvtColor(
-        (img_np * 255).astype(np.uint8), cv2.COLOR_RGB2BGR
+        (img_np * 255).astype(np.uint8), cv2.COLOR_RGB2BGR,
+    )
+
+    logger.info(
+        f"Image loaded: {img_pil.width}x{img_pil.height}, "
+        f"mode={img_pil.mode}"
     )
 
     # ── Detect faces ──
@@ -392,7 +812,7 @@ def cloak_image(
     num_faces = len(faces)
 
     if num_faces == 0:
-        logger.info("No faces detected — returning original image")
+        logger.info("No faces detected")
         buf = io.BytesIO()
         img_pil.save(buf, format=output_format, quality=output_quality)
         return buf.getvalue(), {
@@ -401,73 +821,107 @@ def cloak_image(
             "strength": strength,
             "width": img_pil.width,
             "height": img_pil.height,
+            "model_guided": False,
+            "embedding_distances": [],
+            "avg_embedding_distance": 0.0,
+            "processing_time_seconds": round(time.time() - t0, 2),
         }, None
 
-    # ── Get strength parameters ──
-    epsilon, steps, step_size_factor = STRENGTH_PRESETS[strength]
+    # ── Load recognition model ──
+    model_ok = _ensure_recognizer()
+    logger.info(
+        f"Recognition model: {'SFace (model-guided)' if model_ok else 'unavailable (untargeted)'}"
+    )
+
+    # ── Strength parameters ──
+    epsilon, steps, n_spsa = STRENGTH_PRESETS[strength]
 
     # ── Process each face ──
     result = img_np.copy()
     faces_cloaked = 0
+    emb_dists: list[float] = []
 
     for face in faces:
         bbox = face["bbox"]
-        x1, y1, x2, y2 = [int(v) for v in bbox]
-        x1, y1 = max(0, x1), max(0, y1)
-        x2, y2 = min(img_np.shape[1], x2), min(img_np.shape[0], y2)
-
-        if (x2 - x1) < 10 or (y2 - y1) < 10:
+        x1, y1, x2, y2 = (
+            max(0, int(bbox[0])),
+            max(0, int(bbox[1])),
+            min(img_np.shape[1], int(bbox[2])),
+            min(img_np.shape[0], int(bbox[3])),
+        )
+        fw, fh = x2 - x1, y2 - y1
+        if fw < 10 or fh < 10:
+            logger.warning(f"Skipping tiny face: {fw}x{fh}")
+            emb_dists.append(0.0)
             continue
 
-        face_region = img_np[y1:y2, x1:x2].copy()
-
-        # Generate adversarial perturbation
-        perturbation = _generate_adversarial_perturbation(
-            face_region, epsilon, steps, step_size_factor
+        face_crop = img_np[y1:y2, x1:x2].copy()
+        logger.info(
+            f"Processing face {faces_cloaked+1}/{num_faces}: "
+            f"{fw}x{fh} @ [{x1},{y1},{x2},{y2}]"
         )
 
-        # Create smooth blending mask
-        feather = max(5, min(y2 - y1, x2 - x1) // 8)
+        # ── Generate perturbation ──
+        if model_ok:
+            perturbation, edist = _model_guided_perturbation(
+                face_crop, epsilon, steps, n_spsa,
+            )
+        else:
+            perturbation = _untargeted_perturbation(
+                face_crop, epsilon, steps,
+            )
+            edist = 0.0
+        emb_dists.append(edist)
+
+        # ── Blending mask ──
+        feather = max(5, min(fh, fw) // 8)
         mask = _create_smooth_mask(
-            np.array([x1, y1, x2, y2]), img_np.shape, feather_px=feather
+            np.array([x1, y1, x2, y2]), img_np.shape, feather_px=feather,
         )
 
-        # Apply perturbation directly to face region
+        # ── Apply perturbation ──
         for ch in range(3):
             result[y1:y2, x1:x2, ch] = np.clip(
                 result[y1:y2, x1:x2, ch]
                 + perturbation[:, :, min(ch, perturbation.shape[2] - 1)],
-                0.0,
-                1.0,
+                0.0, 1.0,
             )
 
-        # Smooth transition at edges using the mask
+        # ── Smooth edge transition ──
         for ch in range(3):
-            original_ch = img_np[:, :, ch]
-            cloaked_ch = result[:, :, ch]
-            result[:, :, ch] = original_ch * (1.0 - mask) + cloaked_ch * mask
+            result[:, :, ch] = (
+                img_np[:, :, ch] * (1.0 - mask)
+                + result[:, :, ch] * mask
+            )
 
         faces_cloaked += 1
         logger.info(
             f"Cloaked face {faces_cloaked}/{num_faces} — "
-            f"bbox={bbox[:4].astype(int).tolist()}"
+            f"emb_dist={edist:.4f}, "
+            f"conf={face.get('confidence', 'N/A')}"
         )
 
-    # ── Generate AI analysis ──
+    # ── Aggregate metrics ──
+    valid_dists = [d for d in emb_dists if d > 0]
+    avg_dist = sum(valid_dists) / len(valid_dists) if valid_dists else 0.0
+
+    # ── AI analysis visualisation ──
     analysis_bytes = None
     try:
-        analysis_bytes = generate_analysis(img_np, result, faces)
-        logger.info(f"Generated AI analysis: {len(analysis_bytes)} bytes")
+        analysis_bytes = generate_analysis(
+            img_np, result, faces, emb_dists,
+        )
+        logger.info(f"AI analysis generated: {len(analysis_bytes)} bytes")
     except Exception as e:
         logger.warning(f"Analysis generation failed (non-fatal): {e}")
 
-    # ── Convert back to image ──
-    result_uint8 = (np.clip(result, 0, 1) * 255).astype(np.uint8)
-    result_pil = Image.fromarray(result_uint8, "RGB")
-
+    # ── Encode cloaked image ──
+    out_u8 = (np.clip(result, 0, 1) * 255).astype(np.uint8)
+    out_pil = Image.fromarray(out_u8, "RGB")
     buf = io.BytesIO()
-    result_pil.save(buf, format=output_format, quality=output_quality)
+    out_pil.save(buf, format=output_format, quality=output_quality)
 
+    elapsed = time.time() - t0
     metadata = {
         "faces_detected": num_faces,
         "faces_cloaked": faces_cloaked,
@@ -476,10 +930,15 @@ def cloak_image(
         "pgd_steps": steps,
         "width": img_pil.width,
         "height": img_pil.height,
+        "model_guided": model_ok,
+        "embedding_distances": emb_dists,
+        "avg_embedding_distance": round(avg_dist, 4),
+        "processing_time_seconds": round(elapsed, 2),
     }
 
     logger.info(
         f"Cloaking complete — {faces_cloaked}/{num_faces} faces, "
-        f"strength={strength}"
+        f"strength={strength}, guided={model_ok}, "
+        f"avg_dist={avg_dist:.4f}, time={elapsed:.1f}s"
     )
     return buf.getvalue(), metadata, analysis_bytes

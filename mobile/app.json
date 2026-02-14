@@ -15,7 +15,7 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.void.app",
+      "bundleIdentifier": "com.usevoid.app",
       "usesAppleSignIn": true,
       "infoPlist": {
         "NSCameraUsageDescription": "VOiD needs camera access to capture photos and apply adversarial cloaking to protect your identity.",
@@ -42,6 +42,7 @@
     "plugins": [
       "expo-router",
       "expo-font",
+      "expo-apple-authentication",
       [
         "expo-camera",
         {

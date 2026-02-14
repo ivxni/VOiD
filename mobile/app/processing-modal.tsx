@@ -31,6 +31,9 @@ import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
 import { cloakImageRemote } from '../lib/api/cloakService';
 import type { CloakPhase, CloakProgress } from '../lib/api/cloakService';
 import { useCloakStore } from '../lib/store/useCloakStore';
+import { useSubscriptionStore } from '../lib/store/useSubscriptionStore';
+import { useAuthStore } from '../lib/store/useAuthStore';
+import { apiRequest } from '../lib/api/client';
 import {
   colors,
   fonts,
@@ -70,6 +73,8 @@ export default function ProcessingModal() {
     processingTimeMs: number;
     width: number;
     height: number;
+    modelGuided: boolean;
+    avgEmbeddingDistance: number;
   } | null>(null);
   const [cloakedId, setCloakedId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'cloaked' | 'original' | 'ai'>('cloaked');
@@ -154,6 +159,15 @@ export default function ProcessingModal() {
   }, [progress]);
 
   const startCloaking = async () => {
+    // Check subscription limits before starting
+    const subStore = useSubscriptionStore.getState();
+    if (!subStore.canCloak()) {
+      setModalPhase('error');
+      setMessage('Free tier limit reached. Upgrade to Pro for unlimited cloaks.');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
+
     try {
       const result = await cloakImageRemote(imageUri, strength, (p: CloakProgress) => {
         setCloakPhase(p.phase);
@@ -172,6 +186,8 @@ export default function ProcessingModal() {
         processingTimeMs: result.processingTimeMs,
         width: result.width,
         height: result.height,
+        modelGuided: result.modelGuided,
+        avgEmbeddingDistance: result.avgEmbeddingDistance,
       });
 
       const store = useCloakStore.getState();
@@ -185,10 +201,26 @@ export default function ProcessingModal() {
         processingTimeMs: result.processingTimeMs,
         width: result.width,
         height: result.height,
+        avgEmbeddingDistance: result.avgEmbeddingDistance,
       });
       setCloakedId(useCloakStore.getState().images[0]?.id || null);
 
-      // ⬇ Transition to done — immediate, no opacity animation
+      // Log usage to backend
+      const token = useAuthStore.getState().token;
+      if (token) {
+        apiRequest('/api/v1/users/me/usage', {
+          method: 'POST',
+          token,
+          body: { action_type: 'cloak_photo' },
+        }).then(() => {
+          // Refresh subscription to update remaining cloaks count
+          subStore.refresh();
+        }).catch((err) => {
+          console.warn('[Usage] Failed to log usage:', err);
+        });
+      }
+
+      // Transition to done — immediate
       setModalPhase('done');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch {
@@ -231,16 +263,15 @@ export default function ProcessingModal() {
 
   const displayUri =
     modalPhase === 'done' && viewMode === 'ai' && analysisUri ? analysisUri
-    : modalPhase === 'done' && viewMode === 'cloaked' && cloakedUri ? cloakedUri
+    : modalPhase === 'done' && cloakedUri ? cloakedUri
     : imageUri;
 
   // ──────────────────────────── RENDER ────────────────────────────────────────
 
   return (
     <View style={s.root}>
-      <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
-
-        {/* ── Top bar ── */}
+      {/* ── Top bar (absolute overlay) ── */}
+      <SafeAreaView style={s.topBarSafe} edges={['top']} pointerEvents="box-none">
         <View style={s.topBar}>
           {modalPhase === 'processing' ? (
             <View style={s.liveChip}>
@@ -260,7 +291,10 @@ export default function ProcessingModal() {
             </TouchableOpacity>
           )}
         </View>
+      </SafeAreaView>
 
+      {/* ── Centered content ── */}
+      <View style={s.content}>
         {/* ── Image Card ── */}
         <View style={s.imageWrap}>
           <View style={s.imageCard}>
@@ -287,10 +321,10 @@ export default function ProcessingModal() {
             )}
           </View>
 
-          {/* Toggle row (done only) */}
-          {modalPhase === 'done' && (
+          {/* Toggle row (done only): CLOAKED + AI VIEW */}
+          {modalPhase === 'done' && analysisUri && (
             <View style={s.toggleRow}>
-              {(['cloaked', 'original', ...(analysisUri ? ['ai'] : [])] as const).map((mode) => (
+              {(['cloaked', 'ai'] as const).map((mode) => (
                 <TouchableOpacity
                   key={mode}
                   style={[
@@ -309,7 +343,7 @@ export default function ProcessingModal() {
                       viewMode === mode && (mode === 'ai' ? s.toggleTextAi : s.toggleTextActive),
                     ]}
                   >
-                    {mode === 'ai' ? 'AI VIEW' : mode.toUpperCase()}
+                    {mode === 'ai' ? 'AI VIEW' : 'CLOAKED'}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -441,15 +475,19 @@ export default function ProcessingModal() {
               />
               <View style={s.statDivider} />
               <StatChip
-                icon={<Ionicons name="timer-outline" size={12} color={colors.muted} />}
-                value={`${(resultMeta.processingTimeMs / 1000).toFixed(1)}s`}
-                label="time"
+                icon={<Ionicons name="shield-checkmark" size={12} color={
+                  resultMeta.avgEmbeddingDistance >= 0.3 ? colors.success
+                  : resultMeta.avgEmbeddingDistance >= 0.15 ? '#FFD060'
+                  : colors.muted
+                } />}
+                value={`${Math.round(resultMeta.avgEmbeddingDistance * 100)}%`}
+                label="disruption"
               />
               <View style={s.statDivider} />
               <StatChip
-                icon={<FontAwesome5 name="sliders-h" size={9} color={colors.muted} />}
-                value={strength}
-                label="strength"
+                icon={<Ionicons name="timer-outline" size={12} color={colors.muted} />}
+                value={`${(resultMeta.processingTimeMs / 1000).toFixed(1)}s`}
+                label="time"
               />
             </View>
 
@@ -491,7 +529,7 @@ export default function ProcessingModal() {
             </TouchableOpacity>
           </View>
         )}
-      </SafeAreaView>
+      </View>
     </View>
   );
 }
@@ -544,15 +582,23 @@ function getPhaseLabel(phase: CloakPhase): string {
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.black },
-  safe: { flex: 1 },
+  topBarSafe: {
+    position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10,
+  },
+  content: {
+    flex: 1, justifyContent: 'center', alignItems: 'center',
+  },
 
-  // Top bar
+  // Top bar — absolute so it doesn't push content down
   topBar: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
-    height: 44,
+    height: 54,
+    zIndex: 10,
   },
   liveChip: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
@@ -610,8 +656,8 @@ const s = StyleSheet.create({
 
   // Processing area
   processingArea: {
-    flex: 1, alignItems: 'center', justifyContent: 'center',
-    paddingBottom: spacing.xl,
+    alignItems: 'center', justifyContent: 'center',
+    paddingVertical: spacing.lg,
   },
 
   // Orb
@@ -639,8 +685,7 @@ const s = StyleSheet.create({
 
   // Done area
   doneArea: {
-    flex: 1, justifyContent: 'flex-end',
-    paddingHorizontal: spacing.lg, paddingBottom: spacing.sm,
+    width: '100%', paddingHorizontal: spacing.lg, paddingTop: spacing.md,
   },
   statsRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
@@ -661,8 +706,9 @@ const s = StyleSheet.create({
 
   // Error
   errorArea: {
-    flex: 1, alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center', justifyContent: 'center',
     paddingHorizontal: spacing.xl, gap: spacing.sm,
+    paddingVertical: spacing.xl,
   },
   errorTitle: { fontFamily: fonts.sansBold, fontSize: fontSize.lg, color: colors.error },
   errorMsg: {

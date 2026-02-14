@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,8 @@ import {
   ScrollView,
   TouchableOpacity,
   Dimensions,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -15,6 +17,8 @@ import * as Haptics from 'expo-haptics';
 import { GlassCard } from '../components/ui/GlassCard';
 import { TIERS } from '../lib/constants/subscriptions';
 import type { SubscriptionTier } from '../lib/constants/subscriptions';
+import { useSubscriptionStore } from '../lib/store/useSubscriptionStore';
+import { useAuthStore } from '../lib/store/useAuthStore';
 import {
   colors,
   fonts,
@@ -49,14 +53,61 @@ export default function UpgradeScreen() {
   const router = useRouter();
   const [selectedTier, setSelectedTier] = useState<'pro' | 'proplus'>('pro');
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('yearly');
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const { subscription, upgrade, refresh } = useSubscriptionStore();
+  const { user } = useAuthStore();
+
+  // Refresh subscription on mount
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  // If user already has a subscription, pre-select their tier
+  useEffect(() => {
+    if (subscription.tier === 'pro' || subscription.tier === 'proplus') {
+      setSelectedTier(subscription.tier);
+    }
+    if (subscription.billingCycle) {
+      setBillingCycle(subscription.billingCycle);
+    }
+  }, [subscription.tier, subscription.billingCycle]);
 
   const plan = TIERS[selectedTier];
   const price = billingCycle === 'yearly' ? plan.yearlyPrice : plan.monthlyPrice;
   const period = billingCycle === 'yearly' ? '/year' : '/month';
 
-  const handleSubscribe = () => {
+  // Check if user already has this exact plan
+  const isCurrentPlan =
+    subscription.tier === selectedTier &&
+    subscription.billingCycle === billingCycle &&
+    subscription.status === 'active';
+
+  const handleSubscribe = async () => {
+    if (isCurrentPlan) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      Alert.alert('Already Subscribed', 'You already have this plan active.');
+      return;
+    }
+
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    // TODO: Trigger Apple In-App Purchase
+    setIsProcessing(true);
+
+    try {
+      // In production, this would trigger Apple StoreKit IAP flow.
+      // For development, we call the backend directly to activate.
+      await upgrade(selectedTier, billingCycle);
+
+      Alert.alert(
+        'Subscription Active',
+        `You're now on ${selectedTier === 'proplus' ? 'Pro+' : 'Pro'} (${billingCycle}). Enjoy unlimited cloaking!`,
+        [{ text: 'OK', onPress: () => router.back() }]
+      );
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to activate subscription. Please try again.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -323,17 +374,24 @@ export default function UpgradeScreen() {
       >
         <View style={styles.ctaInner}>
           <TouchableOpacity
-            style={styles.ctaButton}
+            style={[styles.ctaButton, (isProcessing || isCurrentPlan) && { opacity: 0.6 }]}
             onPress={handleSubscribe}
             activeOpacity={0.8}
+            disabled={isProcessing}
           >
             <LinearGradient
-              colors={['#FFFFFF', '#E0E0E0']}
+              colors={isCurrentPlan ? ['#666', '#444'] : ['#FFFFFF', '#E0E0E0']}
               start={{ x: 0, y: 0 }}
               end={{ x: 0, y: 1 }}
               style={styles.ctaButtonGradient}
             >
-              <Text style={styles.ctaButtonText}>Subscribe — {price}{period}</Text>
+              {isProcessing ? (
+                <ActivityIndicator size="small" color={colors.black} />
+              ) : (
+                <Text style={[styles.ctaButtonText, isCurrentPlan && { color: colors.white }]}>
+                  {isCurrentPlan ? 'Current Plan' : `Subscribe — ${price}${period}`}
+                </Text>
+              )}
             </LinearGradient>
           </TouchableOpacity>
           <Text style={styles.ctaHint}>

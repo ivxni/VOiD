@@ -1,12 +1,14 @@
-import { Redirect } from 'expo-router';
-import { useAuthStore } from '../lib/store/useAuthStore';
+import { View } from 'react-native';
+import { colors } from '../lib/constants/theme';
 
+/**
+ * Root index — just a blank screen.
+ *
+ * Navigation is handled entirely by the auth guard in _layout.tsx:
+ *   - Not authenticated → /(auth)/welcome
+ *   - Authenticated + no onboarding → /(auth)/onboarding
+ *   - Authenticated + onboarded → /(tabs)/home
+ */
 export default function Index() {
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-
-  if (isAuthenticated) {
-    return <Redirect href="/(tabs)/camera" />;
-  }
-
-  return <Redirect href="/(auth)/welcome" />;
+  return <View style={{ flex: 1, backgroundColor: colors.black }} />;
 }

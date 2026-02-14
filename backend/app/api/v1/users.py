@@ -21,17 +21,6 @@ from app.api.v1.schemas import (
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
-# Tier limits (monthly cloaks)
-TIER_LIMITS = {
-    'none': 3,       # Free tier
-    'free': 3,
-    'pro': -1,       # Unlimited
-    'proplus': -1,   # Unlimited
-    'active': -1,    # Unlimited (legacy)
-    'premium': -1,   # Unlimited (legacy)
-    'lifetime': -1,  # Unlimited
-}
-
 
 async def get_current_user(
     authorization: str = Header(...),
@@ -74,27 +63,29 @@ async def log_usage(
 
     Enforces free-tier limits (3 cloaks/month for non-premium users).
     """
-    if body.action_type == "cloak_photo":
-        # Check tier limit
-        tier_limit = TIER_LIMITS.get(user.subscription_status, 3)
+    # Import here to avoid circular dependency
+    from app.api.v1.subscriptions import get_cloak_limit, get_remaining_cloaks
 
-        if tier_limit != -1:
-            now = datetime.now(timezone.utc)
-            month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if body.action_type in ("cloak_photo", "cloak_video"):
+        tier = user.effective_tier
+        limit = get_cloak_limit(tier)
 
-            result = await db.execute(
-                select(func.count(UsageLog.id)).where(
-                    UsageLog.user_id == user.id,
-                    UsageLog.action_type == "cloak_photo",
-                    UsageLog.timestamp >= month_start,
-                )
-            )
-            count = result.scalar() or 0
-
-            if count >= tier_limit:
+        if limit != -1:
+            remaining = await get_remaining_cloaks(user, db)
+            if remaining <= 0:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Free tier limit reached ({tier_limit} cloaks/month). Upgrade to Premium or Pro for unlimited.",
+                    detail=f"Free tier limit reached ({limit} cloaks/month). Upgrade to Pro for unlimited.",
+                )
+
+        # Video cloaking requires Pro+
+        if body.action_type == "cloak_video":
+            from app.api.v1.subscriptions import TIER_CONFIG
+            config = TIER_CONFIG.get(tier, TIER_CONFIG["free"])
+            if not config["video_cloaking"]:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Video cloaking requires Pro+. Upgrade to unlock this feature.",
                 )
 
     log = UsageLog(
@@ -113,6 +104,8 @@ async def get_usage_stats(
     db: AsyncSession = Depends(get_db),
 ):
     """Get usage statistics for the current user."""
+    from app.api.v1.subscriptions import get_cloak_limit, get_remaining_cloaks
+
     now = datetime.now(timezone.utc)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
@@ -144,12 +137,12 @@ async def get_usage_stats(
     )
     this_month = result.scalar() or 0
 
-    tier_limit = TIER_LIMITS.get(user.subscription_status, 3)
-    free_remaining = max(0, tier_limit - this_month) if tier_limit != -1 else 0
+    tier = user.effective_tier
+    remaining = await get_remaining_cloaks(user, db)
 
     return UsageStatsResponse(
         total_cloaked=total_cloaked,
         total_saved=total_saved,
         this_month_cloaked=this_month,
-        free_remaining=free_remaining,
+        free_remaining=remaining if remaining != -1 else 0,
     )

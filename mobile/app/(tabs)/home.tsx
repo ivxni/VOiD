@@ -20,7 +20,8 @@ import { GlassCard } from '../../components/ui/GlassCard';
 import { useSettingsStore } from '../../lib/store/useSettingsStore';
 import { useAuthStore } from '../../lib/store/useAuthStore';
 import { useCloakStore } from '../../lib/store/useCloakStore';
-import { getTierForStatus } from '../../lib/constants/subscriptions';
+import { useSubscriptionStore } from '../../lib/store/useSubscriptionStore';
+import { TIERS } from '../../lib/constants/subscriptions';
 import type { CloakMode } from '../../lib/types';
 import {
   colors,
@@ -42,8 +43,14 @@ export default function HomeScreen() {
 
   const strength = useSettingsStore((s) => s.strength);
   const user = useAuthStore((s) => s.user);
-  const tier = getTierForStatus(user?.subscriptionStatus ?? 'none');
+  const { subscription, canCloak, refresh: refreshSubscription } = useSubscriptionStore();
+  const tier = TIERS[subscription.tier] || TIERS.free;
   const cloakStore = useCloakStore();
+
+  // Refresh subscription on mount to get accurate remaining cloaks
+  React.useEffect(() => {
+    refreshSubscription();
+  }, []);
   const recentImages = cloakStore.getRecentImages(3);
   const avgTime = cloakStore.getAverageTime();
 
@@ -63,7 +70,7 @@ export default function HomeScreen() {
   };
 
   const handleImportVideo = async () => {
-    if (!tier.limits.videoCloaking) {
+    if (!subscription.features.videoCloaking) {
       Alert.alert(
         'Pro+ Feature',
         'Video cloaking is available on the Pro+ plan. Upgrade to cloak videos.',
@@ -109,9 +116,9 @@ export default function HomeScreen() {
   };
 
   const cloaksRemaining =
-    tier.limits.monthlyCloak === -1
+    subscription.remainingCloaks === -1
       ? 'Unlimited'
-      : `${Math.max(0, tier.limits.monthlyCloak - cloakStore.totalCloaked)}`;
+      : `${subscription.remainingCloaks}`;
 
   const timeAgo = (ts: number) => {
     const diff = Date.now() - ts;
@@ -165,10 +172,10 @@ export default function HomeScreen() {
               <View style={styles.statCell}>
                 <Text style={styles.statLabel}>REMAINING</Text>
                 <View style={styles.statValueRow}>
-                  <View style={[styles.statDot, { backgroundColor: tier.limits.monthlyCloak === -1 ? colors.success : colors.warning }]} />
+                  <View style={[styles.statDot, { backgroundColor: subscription.remainingCloaks === -1 ? colors.success : colors.warning }]} />
                   <Text style={[
                     styles.statValue,
-                    tier.limits.monthlyCloak === -1 && styles.statValueAccent,
+                    subscription.remainingCloaks === -1 && styles.statValueAccent,
                   ]}>
                     {cloaksRemaining === 'Unlimited' ? '\u221E' : cloaksRemaining}
                   </Text>
@@ -296,7 +303,7 @@ export default function HomeScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity activeOpacity={0.7} onPress={() => {
-          if (!tier.limits.videoCloaking) {
+          if (!subscription.features.videoCloaking) {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
           } else {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -316,12 +323,12 @@ export default function HomeScreen() {
               <View style={styles.actionTextWrap}>
                 <Text style={styles.actionTitle}>Import Video</Text>
                 <Text style={styles.actionSubtitle}>
-                  {tier.limits.videoCloaking
+                  {subscription.features.videoCloaking
                     ? 'Select a video to cloak'
                     : 'Pro+ feature — Upgrade to unlock'}
                 </Text>
               </View>
-              {!tier.limits.videoCloaking ? (
+              {!subscription.features.videoCloaking ? (
                 <View style={styles.proPlusBadge}>
                   <FontAwesome5
                     name="lock"
